@@ -1,0 +1,242 @@
+{
+  "manifest_version": "1.0.0",
+  "package": "progress-monitor",
+  "version": "1.0.0",
+  "inventory_excludes": [
+    "PACKAGE_MANIFEST.json",
+    ".git",
+    "__pycache__",
+    ".cache"
+  ],
+  "file_count": 38,
+  "files": [
+    {
+      "path": ".gitattributes",
+      "bytes": 173,
+      "mode": "0644",
+      "sha256": "d2d2f9dcb863615df00d517a2a2a536e802fc9db7cff25d6e25660dd89594e59"
+    },
+    {
+      "path": ".gitignore",
+      "bytes": 87,
+      "mode": "0644",
+      "sha256": "3a97dade81c9d9d5266626b8b5a8eab3d146866d980f61e466ef4c8867e59136"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 1112,
+      "mode": "0644",
+      "sha256": "e4defeee624b70e9efb4e86bfec069364a80edaef14ac78a612858994e3908a5"
+    },
+    {
+      "path": "README.md",
+      "bytes": 16288,
+      "mode": "0644",
+      "sha256": "fea93a4c3dcd4fb63366acca091b6eee0f97c76cd98328bbc170f7e35b5f0c01"
+    },
+    {
+      "path": "SKILL.md",
+      "bytes": 9651,
+      "mode": "0644",
+      "sha256": "b175f817e7efc4bdb9f45515fed869cc19a65f3a8e522d46790dcd4eb0daa6cd"
+    },
+    {
+      "path": "assets/campaigns/README.md",
+      "bytes": 23878,
+      "mode": "0644",
+      "sha256": "9636eeb679308eae977f6e0f8666685f57f19824dc2b5a6c7d8f7ed14a6927a8"
+    },
+    {
+      "path": "assets/campaigns/_template/campaign.json",
+      "bytes": 2645,
+      "mode": "0644",
+      "sha256": "7ac662d6236cdc4467f25153693aa33aff0b910a392b08e5770443f6ea91254e"
+    },
+    {
+      "path": "assets/campaigns/_template/cells/_cell/cell.md",
+      "bytes": 367,
+      "mode": "0644",
+      "sha256": "312ca89f5bc3f5c25648e4b3e1bc65358c1c83e1becb71abd14a31e249cd1aed"
+    },
+    {
+      "path": "assets/campaigns/_template/cells/_cell/phases/change.status.json",
+      "bytes": 634,
+      "mode": "0644",
+      "sha256": "a753646288954ad29a8fc0fd90701e29eab5723bfef3b348a3abd8476ba60719"
+    },
+    {
+      "path": "assets/campaigns/_template/cells/_cell/phases/prepare.status.json",
+      "bytes": 635,
+      "mode": "0644",
+      "sha256": "0c65f54a57cecb5e78452eddf2dddf7b8858089372809bf909d26407c5e1fb2e"
+    },
+    {
+      "path": "assets/campaigns/_template/evidence_pointers.json",
+      "bytes": 273,
+      "mode": "0644",
+      "sha256": "b6ae1f8c697be5c9ffae2e14781282a260f10b7fef52e0ea5d69bd9887fadb54"
+    },
+    {
+      "path": "assets/campaigns/_template/journey.jsonl",
+      "bytes": 0,
+      "mode": "0644",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "assets/examples/demo-campaign/campaign.json",
+      "bytes": 2508,
+      "mode": "0644",
+      "sha256": "58a3ab5f24819bcbf68a34ebc5111bb4b5f481b29d114b07988ca2926077c74f"
+    },
+    {
+      "path": "assets/examples/demo-campaign/cells/count/cell.md",
+      "bytes": 284,
+      "mode": "0644",
+      "sha256": "10e9d7268d629b1373ce9ae8e6a5060b91c639020b15f778a17be9629db1c0d4"
+    },
+    {
+      "path": "assets/examples/demo-campaign/cells/count/phases/change.status.json",
+      "bytes": 310,
+      "mode": "0644",
+      "sha256": "ac7903b1ce6059e5b85ee9df4e099aabac08e43830f979337437fadcaa302cc2"
+    },
+    {
+      "path": "assets/examples/demo-campaign/cells/count/phases/prepare.status.json",
+      "bytes": 286,
+      "mode": "0644",
+      "sha256": "fd8d4b06d26d3798e25e17b1cfd51fb453c1c5da0f06234826b49e6ad3ce1f0c"
+    },
+    {
+      "path": "assets/examples/demo-campaign/cells/greet/cell.md",
+      "bytes": 313,
+      "mode": "0644",
+      "sha256": "256fa76dbff58197b617d83eef9af6dc0a504cd762d82768bb7637de20e42f84"
+    },
+    {
+      "path": "assets/examples/demo-campaign/cells/greet/phases/change.status.json",
+      "bytes": 312,
+      "mode": "0644",
+      "sha256": "580d9cb4fe3a352491301e7cd03a206ce67e822081de14d7fae4c1b182e9c38b"
+    },
+    {
+      "path": "assets/examples/demo-campaign/cells/greet/phases/prepare.status.json",
+      "bytes": 288,
+      "mode": "0644",
+      "sha256": "1a1ac97ff722ac2bed6a94d50f9a3b0cedaf8d71fdce2b96a69b0c06bb918550"
+    },
+    {
+      "path": "assets/examples/demo-campaign/evidence_pointers.json",
+      "bytes": 44,
+      "mode": "0644",
+      "sha256": "ab9aef04ffad78964dbeaa91c54e09b1d602528fea62204d512aa8993be2bf99"
+    },
+    {
+      "path": "assets/examples/demo-campaign/journey.jsonl",
+      "bytes": 0,
+      "mode": "0644",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "assets/examples/demo-target/README.md",
+      "bytes": 136,
+      "mode": "0644",
+      "sha256": "0581bcdd6999fe503e1b6900c3209c09aab627820dd47c91b5d92f3fed78d03e"
+    },
+    {
+      "path": "assets/examples/demo-target/count/value.txt",
+      "bytes": 2,
+      "mode": "0644",
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "path": "assets/examples/demo-target/greet/message.txt",
+      "bytes": 6,
+      "mode": "0644",
+      "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"
+    },
+    {
+      "path": "assets/examples/docs/demo-checklist.md",
+      "bytes": 122,
+      "mode": "0644",
+      "sha256": "99596a4c30de4a9a79a8095111e88f8253755d0f5860ac3a83a956b9ff0daf09"
+    },
+    {
+      "path": "assets/examples/docs/demo-plan.md",
+      "bytes": 147,
+      "mode": "0644",
+      "sha256": "3da77b7c2c9cb4a58809d286683a38efd90e78bab17ed31753673b616875fa20"
+    },
+    {
+      "path": "references/contract.md",
+      "bytes": 3782,
+      "mode": "0644",
+      "sha256": "7612c4c4fe4ccb139216305da617faadab8a3dd8316cb2e161972d4dea7e2fb1"
+    },
+    {
+      "path": "references/direction.md",
+      "bytes": 5476,
+      "mode": "0644",
+      "sha256": "5b331cfb3c2b2ef69891dfa9f6988726b39ec7036a6c0e78f0c0ed3d582f234b"
+    },
+    {
+      "path": "references/gate.md",
+      "bytes": 12825,
+      "mode": "0644",
+      "sha256": "3e9ff29470bbef4c9f4dfd3237372b10076c86bce20729f76cd9164353ad83e6"
+    },
+    {
+      "path": "references/hooks.md",
+      "bytes": 4003,
+      "mode": "0644",
+      "sha256": "541ad79eb4dd9baf42764141e554df1d3886eb5e5ba6da9036b1890c40aa9daa"
+    },
+    {
+      "path": "references/monitor.md",
+      "bytes": 10029,
+      "mode": "0644",
+      "sha256": "0982af9e7d13ad4415615a6c4695c18ca1786a473c23107b1e0f621d6d27ca19"
+    },
+    {
+      "path": "scripts/check_campaign.py",
+      "bytes": 46412,
+      "mode": "0755",
+      "sha256": "ac645bddff0fcd41602089e6d23b46a5daea374b357cef3fb7e8456aa7f2062e"
+    },
+    {
+      "path": "scripts/package_manifest.py",
+      "bytes": 3566,
+      "mode": "0755",
+      "sha256": "409f8c1a5d2a2ae5ed2dc27e091693b54bf17f0cbcbc2f2f4109dced2e59b2a5"
+    },
+    {
+      "path": "scripts/pm.py",
+      "bytes": 88508,
+      "mode": "0755",
+      "sha256": "67a57cb19bc9bf2761d98d780ba58884850a614444fc9770ec4cabdedb94f01a"
+    },
+    {
+      "path": "scripts/sanitize_check.py",
+      "bytes": 2249,
+      "mode": "0755",
+      "sha256": "a02f9e06dda42dbad782555be3d06c87ebebb84dcb3b4707f49dd673a3580321"
+    },
+    {
+      "path": "scripts/smoke_install.py",
+      "bytes": 8538,
+      "mode": "0755",
+      "sha256": "daa0dcf8c303419d50e39f8fa8cdbac87034f96db5f0427622a861756752ffab"
+    },
+    {
+      "path": "tests/test_package.py",
+      "bytes": 7672,
+      "mode": "0644",
+      "sha256": "69f4b82217a3f0d886907b3a79e88052aae2d169f2beda309e2c0dc28c6cda66"
+    },
+    {
+      "path": "tests/test_pm.py",
+      "bytes": 50105,
+      "mode": "0644",
+      "sha256": "3457963ab3a5433e6b518a77bde35ccc811e0b03522fdbda267c7ae2d3f4d298"
+    }
+  ]
+}

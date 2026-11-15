@@ -1,0 +1,16 @@
+{
+  "schema_version": 2,
+  "cell": "count",
+  "phase": "change",
+  "state": "pending",
+  "attempt": 1,
+  "started": null,
+  "ended": null,
+  "proof": {
+    "check": "git diff --quiet HEAD -- count/value.txt && echo COMMITTED",
+    "expect": "COMMITTED",
+    "ok": false,
+    "source": null
+  },
+  "by": null
+}

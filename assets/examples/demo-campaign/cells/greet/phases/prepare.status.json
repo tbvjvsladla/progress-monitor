@@ -1,0 +1,16 @@
+{
+  "schema_version": 2,
+  "cell": "greet",
+  "phase": "prepare",
+  "state": "pending",
+  "attempt": 1,
+  "started": null,
+  "ended": null,
+  "proof": {
+    "check": "test -f greet/message.txt && echo READY",
+    "expect": "READY",
+    "ok": false,
+    "source": null
+  },
+  "by": null
+}

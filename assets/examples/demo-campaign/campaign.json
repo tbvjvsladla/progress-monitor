@@ -1,0 +1,115 @@
+{
+  "_howto": [
+    "합성 예제 캠페인이다. scripts/smoke_install.py가 빈 임시 프로젝트에 설치해 끝까지 돌린다.",
+    "target.root는 campaigns/ 폴더의 부모(프로젝트 루트) 기준의 demo-target이다."
+  ],
+  "schema_version": 2,
+  "id": "demo",
+  "goal": "두 파일을 바꾸고 한 묶음의 gate와 마지막 전체 검증으로 확인한다",
+  "plan_ref": "docs/demo-plan.md",
+  "checklist_ref": "docs/demo-checklist.md",
+  "declared": "2026-01-01T00:00:00+00:00",
+  "target": {
+    "root": "demo-target",
+    "env_probe": []
+  },
+  "phases": [
+    "prepare",
+    "change"
+  ],
+  "review": {
+    "round_cap": 3
+  },
+  "budgets": {
+    "stall_stops": 2,
+    "stop_block_cap": 6,
+    "stall_retries": 1,
+    "phase_minutes": 90,
+    "auto_cells": 5,
+    "forced_reruns_per_check": 1,
+    "forced_reruns_total": 3,
+    "exec_retries": 2,
+    "check_timeout_s": 60,
+    "explore_candidates": 3,
+    "explore_rounds": 6
+  },
+  "briefing": {
+    "on_phase": false,
+    "every_hours": null
+  },
+  "checks": [
+    {
+      "id": "greet-check",
+      "cmd": "grep -x 'hello, campaign' greet/message.txt && echo GREET-OK",
+      "cwd": ".",
+      "expect": "GREET-OK",
+      "inputs": [
+        "greet"
+      ],
+      "env": [],
+      "covers": []
+    },
+    {
+      "id": "count-check",
+      "cmd": "test \"$(cat count/value.txt)\" = 2 && echo COUNT-OK",
+      "cwd": ".",
+      "expect": "COUNT-OK",
+      "inputs": [
+        "count"
+      ],
+      "env": [],
+      "covers": []
+    },
+    {
+      "id": "all",
+      "cmd": "grep -qx 'hello, campaign' greet/message.txt && test \"$(cat count/value.txt)\" = 2 && echo ALL-OK",
+      "cwd": ".",
+      "expect": "ALL-OK",
+      "inputs": [
+        "greet",
+        "count"
+      ],
+      "env": [],
+      "covers": [
+        "greet-check",
+        "count-check"
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "group": "g-demo",
+      "checks": [
+        "greet-check",
+        "count-check"
+      ]
+    }
+  ],
+  "final": {
+    "checks": [
+      "all"
+    ]
+  },
+  "cells": [
+    {
+      "cell": "greet",
+      "goal": "인사말을 'hello, campaign'으로 바꾼다",
+      "group": "g-demo",
+      "needs": [],
+      "review": "none",
+      "origin": "plan",
+      "parent": null,
+      "state": "open"
+    },
+    {
+      "cell": "count",
+      "goal": "값을 2로 올린다",
+      "group": "g-demo",
+      "needs": [],
+      "review": "none",
+      "origin": "plan",
+      "parent": null,
+      "state": "open"
+    }
+  ]
+}
