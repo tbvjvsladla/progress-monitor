@@ -1,12 +1,16 @@
 //! Distribution hygiene scan: site names, personal home paths, private IPs, e-mail
 //! addresses and the identifiers of the projects this package was extracted from.
 //!
-//! The five patterns are matched by hand (no pattern crate). Digits and case folding
-//! are ASCII; the line is otherwise read as Unicode text.
+//! The five patterns are the baseline pattern strings compiled with `fancy-regex`
+//! (Unicode `\d`, simple case folding). Two spots are adapted so the matches stay the
+//! baseline's: see `baseline_compat`.
 
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+use fancy_regex::Regex;
 
 use crate::py::splitlines;
 
@@ -22,18 +26,62 @@ pub const NAMES: [&str; 5] = [
     "project_identifier",
 ];
 
-// Written in pieces so this file does not match itself.
-const SITE_NAMES: [&[&str]; 2] = [
-    &["\u{acbd}\u{b9ac}", "\u{b098}\u{b77c}"],
-    &["kyung", "rinara"],
-];
-/// `head` + one of `_` or `-` + `tail`, case-insensitive.
-const PROJECT_JOINED: [(&[&str], &str); 3] = [
-    (&["easy"], "vllm"),
-    (&["vllm"], "simulator"),
-    (&["her", "mes"], "subagent"),
-];
-const PROJECT_PLAIN: [&str; 2] = ["val", "_agent"];
+/// The baseline pattern strings, in report order, and whether each one ignores case.
+/// Site and project names are written in pieces so this file does not match itself.
+fn baseline_patterns() -> [(String, bool); 5] {
+    let site_names = [
+        "\u{acbd}\u{b9ac}\u{b098}\u{b77c}".to_string(),
+        ["kyung", "rinara"].concat(),
+    ];
+    let project_names = [
+        ["val", "_agent"].concat(),
+        ["easy", "[_-]vllm"].concat(),
+        ["vllm", "[_-]simulator"].concat(),
+        ["her", "mes[_-]subagent"].concat(),
+    ];
+    [
+        (site_names.join("|"), true),
+        (r"/home/[a-z_][a-z0-9_-]*/".to_string(), false),
+        (
+            r"(?<![0-9.])(?:10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}(?![0-9])"
+                .to_string(),
+            false,
+        ),
+        (
+            r"[A-Za-z0-9._%+-]+@(?!example\.(?:invalid|com|org)\b)[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
+                .to_string(),
+            false,
+        ),
+        (project_names.join("|"), true),
+    ]
+}
+
+/// The baseline pattern rewritten where the Rust engine reads it differently.
+///
+/// - `\b`: the baseline word characters are `str.isalnum()` or `_` (letters and every
+///   numeric character, not combining marks); the engine's `\w` adds marks and leaves
+///   out `No`/`Nl` numbers. Every `\b` here follows a letter, so it is "no word
+///   character next", written with the baseline's word set.
+/// - Ignoring case, the baseline also matches `i` with U+0130 and U+0131, which simple
+///   case folding does not; `i` only occurs in the literal names.
+fn baseline_compat(pattern: &str, ignore_case: bool) -> String {
+    let pattern = pattern.replace(r"\b", r"(?![\p{L}\p{N}_])");
+    if ignore_case {
+        format!("(?i){}", pattern.replace('i', "[i\u{130}\u{131}]"))
+    } else {
+        pattern
+    }
+}
+
+fn compiled() -> &'static [Regex; 5] {
+    static PATTERNS: OnceLock<[Regex; 5]> = OnceLock::new();
+    PATTERNS.get_or_init(|| {
+        baseline_patterns().map(|(pattern, ignore_case)| {
+            Regex::new(&baseline_compat(&pattern, ignore_case))
+                .expect("the sanitize patterns are valid")
+        })
+    })
+}
 
 /// One hit: path relative to the root (with `/`), 1-based line number, pattern name.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,158 +93,14 @@ pub struct Hit {
 
 /// The names of the patterns that occur in `line`, in report order.
 pub fn line_hits(line: &str) -> Vec<&'static str> {
-    let chars: Vec<char> = line.chars().collect();
-    let tests: [fn(&[char]) -> bool; 5] =
-        [site_name, home_path, private_ip, email, project_identifier];
     NAMES
         .iter()
-        .zip(tests)
-        .filter(|(_, test)| test(&chars))
+        .zip(compiled())
+        // The patterns have no backreferences or deep nesting; a backtrack-limit error
+        // cannot occur, and counting it as no hit would hide a finding, so it panics.
+        .filter(|(_, re)| re.is_match(line).expect("sanitize pattern ran"))
         .map(|(name, _)| *name)
         .collect()
-}
-
-fn pieces(parts: &[&str]) -> Vec<char> {
-    parts.concat().chars().collect()
-}
-
-/// Whether `needle` occurs in `hay` with ASCII letters compared case-insensitively.
-fn contains_fold(hay: &[char], needle: &[char]) -> bool {
-    !needle.is_empty()
-        && hay.len() >= needle.len()
-        && hay
-            .windows(needle.len())
-            .any(|w| w.iter().zip(needle).all(|(a, b)| a.eq_ignore_ascii_case(b)))
-}
-
-fn site_name(line: &[char]) -> bool {
-    SITE_NAMES
-        .iter()
-        .any(|parts| contains_fold(line, &pieces(parts)))
-}
-
-fn project_identifier(line: &[char]) -> bool {
-    contains_fold(line, &pieces(&PROJECT_PLAIN))
-        || PROJECT_JOINED.iter().any(|(head, tail)| {
-            ["_", "-"].iter().any(|sep| {
-                let joined = [head.concat().as_str(), sep, tail].concat();
-                contains_fold(line, &joined.chars().collect::<Vec<_>>())
-            })
-        })
-}
-
-fn starts_with(line: &[char], at: usize, text: &str) -> bool {
-    (at..)
-        .zip(text.chars())
-        .all(|(i, ch)| line.get(i) == Some(&ch))
-}
-
-fn run_len(line: &[char], at: usize, class: impl Fn(char) -> bool) -> usize {
-    line[at.min(line.len())..]
-        .iter()
-        .take_while(|c| class(**c))
-        .count()
-}
-
-/// `/home/[a-z_][a-z0-9_-]*/`
-fn home_path(line: &[char]) -> bool {
-    let prefix = ["/ho", "me/"].concat();
-    (0..line.len()).any(|i| {
-        if !starts_with(line, i, &prefix) {
-            return false;
-        }
-        let start = i + prefix.len();
-        let first = line.get(start);
-        if !first.is_some_and(|c| c.is_ascii_lowercase() || *c == '_') {
-            return false;
-        }
-        let n = run_len(line, start, |c| {
-            c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-'
-        });
-        line.get(start + n) == Some(&'/')
-    })
-}
-
-/// `\d{1,3}` then `.` at `at`; returns the position after the dot.
-fn octet_dot(line: &[char], at: usize) -> Option<usize> {
-    let n = run_len(line, at, |c| c.is_ascii_digit());
-    ((1..=3).contains(&n) && line.get(at + n) == Some(&'.')).then_some(at + n + 1)
-}
-
-/// `(?<![0-9.])(?:10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}(?![0-9])`
-fn private_ip(line: &[char]) -> bool {
-    let digit = |c: Option<&char>| c.is_some_and(|c| c.is_ascii_digit());
-    (0..line.len()).any(|i| {
-        if i > 0 && (line[i - 1].is_ascii_digit() || line[i - 1] == '.') {
-            return false;
-        }
-        let after_head = if starts_with(line, i, "10.") {
-            octet_dot(line, i + 3)
-        } else if starts_with(line, i, "172.") {
-            let (a, b) = (line.get(i + 4), line.get(i + 5));
-            let second = match a {
-                Some('1') => b.is_some_and(|c| ('6'..='9').contains(c)),
-                Some('2') => digit(b),
-                Some('3') => matches!(b, Some('0') | Some('1')),
-                _ => false,
-            };
-            (second && line.get(i + 6) == Some(&'.')).then_some(i + 7)
-        } else if starts_with(line, i, "192.168.") {
-            Some(i + 8)
-        } else {
-            None
-        };
-        let Some(third) = after_head.and_then(|at| octet_dot(line, at)) else {
-            return false;
-        };
-        let n = run_len(line, third, |c| c.is_ascii_digit());
-        (1..=3).contains(&n)
-    })
-}
-
-fn local_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || "._%+-".contains(c)
-}
-
-fn domain_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '.' || c == '-'
-}
-
-/// A word character of a Unicode text pattern: letters, numbers and `_`.
-fn word_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_'
-}
-
-/// `example\.(?:invalid|com|org)\b` at `at`.
-fn allowed_domain(line: &[char], at: usize) -> bool {
-    let base = "example.";
-    if !starts_with(line, at, base) {
-        return false;
-    }
-    let at = at + base.len();
-    ["invalid", "com", "org"].iter().any(|tld| {
-        starts_with(line, at, tld) && !line.get(at + tld.len()).is_some_and(|c| word_char(*c))
-    })
-}
-
-/// `[A-Za-z0-9._%+-]+@(?!example\.(?:invalid|com|org)\b)[A-Za-z0-9.-]+\.[A-Za-z]{2,}`
-fn email(line: &[char]) -> bool {
-    (1..line.len()).any(|at| {
-        if line[at] != '@' || !local_char(line[at - 1]) || allowed_domain(line, at + 1) {
-            return false;
-        }
-        let start = at + 1;
-        let n = run_len(line, start, domain_char);
-        (1..n).any(|i| {
-            line[start + i] == '.'
-                && line
-                    .get(start + i + 1)
-                    .is_some_and(|c| c.is_ascii_alphabetic())
-                && line
-                    .get(start + i + 2)
-                    .is_some_and(|c| c.is_ascii_alphabetic())
-        })
-    })
 }
 
 /// Every path under `dir`, sorted by parts; directory links are listed but not entered,
@@ -340,11 +244,25 @@ mod tests {
     }
 
     #[test]
-    fn digits_and_case_folding_are_ascii() {
-        // Outside the supported input: the baseline also matched these (Unicode digit,
-        // Kelvin sign as k). This port keeps both ASCII; see PORTING.md.
-        assert!(line_hits(&"10~.\u{663}.2.3".replace('~', "")).is_empty());
-        assert!(line_hits(&"\u{212a}yung~rinara".replace('~', "")).is_empty());
-        assert!(line_hits(&"ea\u{17f}y-vl~lm".replace('~', "")).is_empty());
+    fn unicode_digits_folding_and_word_boundary_follow_the_baseline() {
+        // Expected names taken from the baseline patterns on the same lines.
+        let cases: [(&str, &[&str]); 12] = [
+            ("10~.\u{663}.2.3", &["private_ip"]),
+            ("10~.1.2.\u{1d7d1}", &["private_ip"]),
+            ("10~.1.2.\u{b2}", &[]),
+            ("\u{212a}yung~rinara", &["site_name"]),
+            ("kyungr\u{131}~nara", &["site_name"]),
+            ("KYUNGR\u{130}~NARA", &["site_name"]),
+            ("ea\u{17f}y-vl~lm", &["project_identifier"]),
+            ("vllm_s\u{130}mul~ator", &["project_identifier"]),
+            ("me~@example.com\u{b2}", &["email"]),
+            ("me~@example.org\u{2160}.io", &["email"]),
+            ("me~@example.com\u{903}", &[]),
+            ("me~@example.invalid\u{5d0}", &["email"]),
+        ];
+        for (raw, want) in cases {
+            let line = raw.replace('~', "");
+            assert_eq!(line_hits(&line), want.to_vec(), "line {raw:?}");
+        }
     }
 }

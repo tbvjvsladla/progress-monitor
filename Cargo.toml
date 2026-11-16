@@ -14,3 +14,4 @@ path = "src/lib.rs"
 serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
 sha2 = "0.10"
 libc = "0.2"
+fancy-regex = "0.20.2"

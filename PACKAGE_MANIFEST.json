@@ -25,15 +25,15 @@
     },
     {
       "path": "Cargo.lock",
-      "bytes": 5723,
+      "bytes": 7101,
       "mode": "0644",
-      "sha256": "1f87d80c32ba801eecb90b57820a498838a627d8ce5adae3e7cfe8948416164b"
+      "sha256": "fe4bf1448af2bb26ac074d81aa23b2c078837a4ff3606b08072372d5931e9a99"
     },
     {
       "path": "Cargo.toml",
-      "bytes": 392,
+      "bytes": 415,
       "mode": "0644",
-      "sha256": "f7dd90b8f4dfcf86e2ef04937c82b04c1f9fd2507ca9abf07cccc1cd84ed08b3"
+      "sha256": "01492ba22fa237a53121c1118b8055e255877378e855609dddeb558c7716b731"
     },
     {
       "path": "LICENSE",
@@ -43,9 +43,9 @@
     },
     {
       "path": "PORTING.md",
-      "bytes": 42619,
+      "bytes": 43837,
       "mode": "0644",
-      "sha256": "95ab7eb390b76daa0702420d0fc7c3495d3cee6f08044555a4be0e779c772fba"
+      "sha256": "1caeb3a57ddfaf505d4eaa79114c8ab424023b00ecd385bd7529cb340d6c1973"
     },
     {
       "path": "README.md",
@@ -403,9 +403,9 @@
     },
     {
       "path": "src/sanitize.rs",
-      "bytes": 11832,
+      "bytes": 9586,
       "mode": "0644",
-      "sha256": "3e07e87dc3fa05ccf570dc14893454ed8a5240d17061ce187b38b34fc53ab0b5"
+      "sha256": "e48cafa5aca227ef37d1a582f6ed3e698bb4e1abf607e71db3f6cf38799c1d8b"
     },
     {
       "path": "src/status.rs",

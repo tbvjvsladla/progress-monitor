@@ -275,7 +275,7 @@ prepare 계획대로 `src/lint/{mod,declaration,rules,control,cli}.rs`로 나눴
 
 | 원본 | Rust |
 |---|---|
-| `sanitize_check.py`의 `FORBIDDEN`(5 패턴), `EXCLUDED_DIRS`, `scan` | `src/sanitize.rs`: `NAMES`(보고 순서 site_name, home_path, private_ip, email, project_identifier), 손으로 쓴 매처 `line_hits`, `EXCLUDED_DIRS`(+`target`), `scan(root) -> Vec<Hit{rel, line, name}>` |
+| `sanitize_check.py`의 `FORBIDDEN`(5 패턴), `EXCLUDED_DIRS`, `scan` | `src/sanitize.rs`: `NAMES`(보고 순서 site_name, home_path, private_ip, email, project_identifier), 기준선 패턴 문자열 `baseline_patterns`와 `fancy-regex`로 컴파일한 `line_hits`, `EXCLUDED_DIRS`(+`target`), `scan(root) -> Vec<Hit{rel, line, name}>` |
 | `sanitize_check.py`의 `main` | `src/bin/sanitize_check.rs`: 인자 하나면 그 root(비엄격 resolve), 없으면 실행 파일의 스킬 폴더. `rel:n: name` 줄들과 `SANITIZE OK (0 hits)`/`SANITIZE FAIL (N hits)`, exit 0/1 |
 | `package_manifest.py`의 상수, `inventory`, `build`, `package_version`, `diff` | `src/manifest.rs`: `MANIFEST`, `MANIFEST_VERSION`, `PACKAGE_NAME`, `INVENTORY_EXCLUDES`(+`target`), `inventory`, `build -> Value`(키 순서 그대로), `package_version`, `diff`(항목 비교는 `py_eq`) |
 | `package_manifest.py`의 `main` | `src/bin/package_manifest.rs`: `--check`는 어느 자리든, 나머지 첫 인자가 root. `MANIFEST MISSING: …` / `MANIFEST OK (N files)` / `MANIFEST MISMATCH: …` / `MANIFEST written (N files)`; 쓰기는 indent 2 + 줄바꿈. `SystemExit` 문구(심볼릭 링크·특수 파일, version 없음)는 stderr, exit 1 |
@@ -301,14 +301,15 @@ prepare 계획대로 `src/lint/{mod,declaration,rules,control,cli}.rs`로 나눴
 
 `Installed`는 패키지(`CARGO_MANIFEST_DIR`)를 `SKIP`을 빼고 복사한 뒤 `CARGO_BIN_EXE_pm`·`CARGO_BIN_EXE_check_campaign`을 사본 `target/release/`에 둔다. sanitize·manifest·smoke는 `CARGO_BIN_EXE_*`로 부른다.
 
-### sanitize 매처 (정규식 없이)
+### sanitize 매처 (`fancy-regex`, attempt 2)
 
-- site_name·project_identifier: 대안 문자열(문자 클래스 `[_-]`는 두 대안으로 펼침)을 ASCII 대소문자 무시로 찾는다. 소스에는 조각으로 써서 자기 자신에 걸리지 않는다.
-- home_path: `/home/` 뒤 `[a-z0-9_-]`의 최대 연속이 `[a-z_]`로 시작하고 바로 뒤가 `/`.
-- private_ip: 앞 글자가 `[0-9.]`가 아닌 시작 위치에서 `10.D` | `172.(1[6-9]|2d|3[01])` | `192.168`, 뒤에 `.D.D`; `D`는 숫자 최대 연속 1–3개(숫자와 `.`이 겹치지 않으므로 역추적 결과와 같다).
-- email: `@`마다 앞 글자가 `[A-Za-z0-9._%+-]`이고, `@` 뒤가 `example.(invalid|com|org)` + 단어 경계가 아니며, `@` 뒤 `[A-Za-z0-9.-]` 최대 연속 안의 1번 이후 위치에 `.` + ASCII 글자 2개가 있다. 단어 경계의 단어 글자는 `char::is_alphanumeric` 또는 `_`.
+사용자 결정(2026-11-16)으로 attempt 1의 손 구현 매처를 없애고 `fancy-regex`(Cargo.toml에 추가, Cargo.lock 고정, 0.20.2)를 쓴다. 기준선 `FORBIDDEN`의 패턴 문자열을 `baseline_patterns`에 그대로 옮기고(이름은 자기 자신에 걸리지 않게 조각으로), IGNORECASE는 `(?i)`로 준다. 엔진이 기준선과 다르게 읽는 두 곳만 `baseline_compat`이 고친다.
+
+- `\b`(email의 `example.(invalid|com|org)\b`): 기준선의 단어 글자는 `str.isalnum()` 또는 `_`(글자와 모든 수 글자, 결합 부호 아님)이고, 엔진의 `\w`는 결합 부호를 넣고 `No`·`Nl` 수를 뺀다. 이 `\b`는 늘 글자 뒤에 오므로 "다음 글자가 단어 글자가 아님"과 같고, 이를 `(?![\p{L}\p{N}_])`로 쓴다.
+- 대소문자 무시: 기준선은 `i`를 U+0130·U+0131과도 맞추는데 단순 대소문자 접기는 그렇지 않다. `i`는 이름 리터럴에만 있으므로 `(?i)` 패턴의 `i`를 `[i\u{130}\u{131}]`로 바꾼다. U+212A→k, U+017F→s는 엔진의 단순 접기가 그대로 맞춘다.
+- `\d`는 엔진도 유니코드 10진 숫자(`Nd`)다. 뒤보기 `(?<![0-9.])`와 앞보기는 `fancy-regex`가 처리한다.
 - 걷기: 이름 정렬(부분 경로 목록 순), 디렉터리 심볼릭 링크는 나열만 하고 내려가지 않음, 파일 링크는 읽음, NUL 바이트가 있으면 건너뜀, UTF-8 대체 디코드 후 `splitlines`.
-- 기준선 대조: 기준선 패턴에 같은 64줄(경계 IP, 172.15/172.32, 4자리 옥텟, home 아래 이름이 `_`·숫자로 시작하는 경우, `example.comx.io`·`example.com-x`·`example.comé`·결합 문자, 대소문자 변형, `[_-]` 변형 등)을 넣어 뽑은 기대값을 `sanitize::tests::patterns_match_like_the_baseline`에 두었다. 심어 둔 파일·링크·NUL 파일·`target/` 하위 파일이 있는 폴더에서 두 판의 출력은 `target/` 줄(의도한 변경 6)만 다르다.
+- 기준선 대조: 단위 시험 두 개가 기대값을 고정한다. 기준선 패턴에 같은 64줄(경계 IP, 172.15/172.32, 4자리 옥텟, home 아래 이름이 `_`·숫자로 시작하는 경우, `example.comx.io`·`example.com-x`·`example.comé`·결합 문자, 대소문자 변형, `[_-]` 변형 등)을 넣어 뽑은 기대값을 `sanitize::tests::patterns_match_like_the_baseline`에, 아라비아·수학 숫자 IP, U+212A·U+017F·U+0130·U+0131이 든 이름, `example.com` 뒤 위 첨자·로마 숫자·결합 부호(Mc)·히브리 글자의 12줄을 `unicode_digits_folding_and_word_boundary_follow_the_baseline`에 두었다. 전수 대조: U+0000–U+1FFFF와 U+E0000–U+E01EF의 모든 문자(줄 구분 문자·서로게이트 제외)를 75개 틀(이름 글자 자리마다, `example.*` 뒤, IP 옥텟 안팎, home 이름, email 앞뒤)에 넣은 970만 줄 파일을 두 판 `sanitize_check`로 훑었다. 다른 줄 13,386개는 모두 기준선 Python 3.12의 유니코드 15.0에서 미할당(`Cn`)이고 엔진의 유니코드 16에서 할당된 문자가 든 줄이다(아래 알려진 차이). 심어 둔 파일·링크·NUL 파일·`target/` 하위 파일이 있는 폴더에서 두 판의 출력은 `target/` 줄(의도한 변경 6)만 다르다.
 
 ### 보존한 특이 동작
 
@@ -327,16 +328,19 @@ prepare 계획대로 `src/lint/{mod,declaration,rules,control,cli}.rs`로 나눴
 
 ### 알려진 차이(지원 범위 밖)
 
-- sanitize의 `\d`는 ASCII 숫자만, 대소문자 무시는 ASCII만 접는다(오케스트레이터 결정). 기준선은 유니코드 10진 숫자(예: U+0663)와 U+212A(Kelvin)→k, U+017F(long s)→s도 맞췄다. 이 입력은 지원 범위 밖이며 `digits_and_case_folding_are_ascii`가 이 판의 동작을 고정한다.
-- email 단어 경계의 단어 글자: Rust `is_alphanumeric`은 Other_Alphabetic 결합 부호(일부 Mn/Mc)를 글자로 본다. 기준선 `\w`는 이것들을 글자로 보지 않는다. U+0301 같은 일반 결합 부호는 둘 다 글자가 아니다.
+- attempt 1에 적었던 ASCII 한정 `\d`·대소문자 접기와 email 단어 경계의 결합 부호 차이는 attempt 2에서 해소했다(위 매처 절).
+- 유니코드 판: 기준선 Python 3.12는 유니코드 15.0, `regex-syntax` 0.8은 유니코드 16 표를 쓴다. 15.0에서 미할당이고 16에서 글자·숫자가 된 문자(예: U+1C89, U+A7CB)는 email 단어 경계와 대소문자 접기에서 기준선과 다르게 읽힌다. 기준선 Python의 유니코드 판에 묶인 차이다.
 - smoke에서 예상하지 못한 오류(하위 프로세스 시간 초과, JSON이 아닌 lint 출력, 없는 키)는 기준선의 traceback 대신 stderr 한 줄과 exit 1. 판정(실패·exit 1·임시 폴더 삭제)은 같다. stdin 입력이 없는 하위 프로세스의 stdin은 `/dev/null`.
 - 시험과 smoke는 기본 `target/` 위치를 전제로 한다. `CARGO_TARGET_DIR`를 바꾸면 기본 root(실행 파일 세 단계 위)가 패키지가 아니게 된다.
 
 ### 검사
 
-- `cargo build --locked`, `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`: 통과(자기 확인).
-- `rm -rf target/release && cargo test --locked`: lib 단위 14건 + 통합 62건(package 12, rules 19, final_run 4, transitions 19, hook 8) 통과(자기 확인).
-- `target/debug/sanitize_check`: `SANITIZE OK (0 hits)`. `package_manifest --check`: `MANIFEST OK`. `smoke_install`: `SMOKE-PASS`. 바이너리가 옆에 없는 smoke: step `install` FAIL, exit 1.
-- manifest 대조: 기준선 트리 사본 두 개에 기준선과 Rust 판으로 각각 쓴 MANIFEST는 `inventory_excludes`의 `target`만 다르고, 서로의 `--check`를 통과한다. 파일 추가·버전 변경·MANIFEST 없음·심볼릭 링크의 출력과 종료 코드도 기준선 문구와 같다.
+attempt 2(c10 회차 1·2, c11 회차 1 반영 뒤 트리) 자기 확인:
 
-판정: **COMPLETE** (`sanitize_check`, `package_manifest`, `smoke_install`, `tests/test_package.py` 12건). `.py` 삭제·문서 나머지·MANIFEST 최종 재생성은 c21의 몫이다.
+- `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`: 통과.
+- `rm -rf target/release && cargo test --locked`: lib 단위 28건 + 통합(package 12 포함) 모두 통과.
+- release의 `sanitize_check`: `SANITIZE OK (0 hits)`. `package_manifest --check`: `MANIFEST OK`. `smoke_install`: `SMOKE-PASS`.
+- c10의 JSON 변경(전체 보존 `jsonio`) 영향: 기준선 트리 사본 두 개에 기준선과 Rust 판으로 쓴 MANIFEST는 `inventory_excludes`의 `target`만 다르고 서로의 `--check`를 통과한다. 파일 추가(`MANIFEST MISMATCH: new.txt`)·심볼릭 링크 문구와 종료 코드도 같다. smoke는 c10 이후 출력으로 `SMOKE-PASS`.
+- sanitize 전수 대조: 위 매처 절.
+
+판정: **COMPLETE** (`sanitize_check`, `package_manifest`, `smoke_install`, `tests/test_package.py` 12건). sanitize는 기준선 패턴 문자열 그대로이고, 남은 차이는 유니코드 판 차이뿐이다. `.py` 삭제·문서 나머지·MANIFEST 최종 재생성은 c21의 몫이다.
