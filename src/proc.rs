@@ -83,15 +83,39 @@ fn wait_until(child: &mut Child, deadline: Option<Instant>) -> std::io::Result<O
 }
 
 /// Run a command with stdout and stderr captured; on timeout kill the child (not its group).
-pub fn capture(mut command: Command, timeout: Duration) -> Captured {
+pub fn capture(command: Command, timeout: Duration) -> Captured {
+    capture_input(command, None, timeout)
+}
+
+/// [`capture`] with `input` written to the child's stdin (then closed) when given.
+pub fn capture_input(mut command: Command, input: Option<&str>, timeout: Duration) -> Captured {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    if input.is_some() {
+        command.stdin(Stdio::piped());
+    }
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(err) => return Captured::Failed(err),
     };
+    let feeder = match (child.stdin.take(), input) {
+        (Some(mut stdin), Some(text)) => {
+            let bytes = text.as_bytes().to_vec();
+            Some(thread::spawn(move || {
+                let _ = stdin.write_all(&bytes);
+            }))
+        }
+        _ => None,
+    };
     let out = child.stdout.take().map(read_all);
     let err = child.stderr.take().map(read_all);
-    match wait_until(&mut child, Some(Instant::now() + timeout)) {
+    let waited = wait_until(&mut child, Some(Instant::now() + timeout));
+    if let Some(feeder) = feeder {
+        if !matches!(waited, Ok(Some(_))) {
+            let _ = child.kill();
+        }
+        let _ = feeder.join();
+    }
+    match waited {
         Ok(Some(status)) => {
             let text = |h: Option<thread::JoinHandle<Vec<u8>>>| {
                 h.and_then(|h| h.join().ok())

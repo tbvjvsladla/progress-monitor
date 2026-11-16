@@ -109,7 +109,7 @@ prepare 계획대로 `src/lint/{mod,declaration,rules,control,cli}.rs`로 나눴
 - `cargo build --locked`, `cargo build --release --locked`: 통과.
 - `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`: 통과(자기 확인).
 - `cargo test --locked`: 단위 시험 12건 통과(이 cell 몫: 접미 규칙, blank, 구성요소 순 정렬, 인자 파서, `parse_time_detail`).
-- 기준선 대조 `temp/pm-rust-261116/c11-lint-cmp/compare.sh target/release/check_campaign`(같은 cwd·`PM_PROJECT_ROOT`, 스킬 경로만 가림): 98건 중 96건 stdout 바이트·종료 코드 같음. 다른 2건은 `not JSON (...)` 괄호 문구(의도한 변경 7). 대상: `--list-control`, 기본 템플릿, `--template` 강제, demo-campaign(`--root` 유무), 없는 경로·파일·빈 경로, val_agent 실제 인스턴스 3개와 템플릿, 대조 case 33개 사본, 순회(숨김·링크·정렬·`.json` 규칙·바이너리), journey 형식, cell.md 형태, phase·pointer·gate·선언 형태 40여 개, structure·auto-cap, exit 1 입력 6개, `PM_PROJECT_ROOT`.
+- 기준선 대조 `temp/pm-rust-261116/c11-lint-cmp/compare.sh target/release/check_campaign`(같은 cwd·`PM_PROJECT_ROOT`, 스킬 경로만 가림): 98건 중 96건 stdout 바이트·종료 코드 같음. 다른 2건은 `not JSON (...)` 괄호 문구(의도한 변경 7). 대상: `--list-control`, 기본 템플릿, `--template` 강제, demo-campaign(`--root` 유무), 없는 경로·파일·빈 경로, 호스트 프로젝트의 실제 인스턴스 3개와 템플릿, 대조 case 33개 사본, 순회(숨김·링크·정렬·`.json` 규칙·바이너리), journey 형식, cell.md 형태, phase·pointer·gate·선언 형태 40여 개, structure·auto-cap, exit 1 입력 6개, `PM_PROJECT_ROOT`.
 - 오라클(`PM_BIN=target/release/pm PM_LINT_BIN=target/release/check_campaign`): `Ran 50 tests ... OK`.
 
 판정: **COMPLETE** (`scripts/check_campaign.py`의 모든 규칙·자체검사·CLI). `tests/*.rs` 이식(c12), 패키지 도구(c20), `.py` 삭제·문서(c21)는 다른 cell의 몫이다.
@@ -214,3 +214,75 @@ prepare 계획대로 `src/lint/{mod,declaration,rules,control,cli}.rs`로 나눴
 - `grep -rniE 'python|\.py\b' tests/*.rs tests/common`: 0건.
 
 판정: **COMPLETE** (`tests/test_pm.py` 50건). `tests/test_package.py` 12건(c20), `.py` 삭제(c21)는 다른 cell의 몫이다.
+
+## c20-pkg — `scripts/{sanitize_check,package_manifest,smoke_install}.py`, `tests/test_package.py` → Rust
+
+### 원본 → Rust 대응
+
+| 원본 | Rust |
+|---|---|
+| `sanitize_check.py`의 `FORBIDDEN`(5 패턴), `EXCLUDED_DIRS`, `scan` | `src/sanitize.rs`: `NAMES`(보고 순서 site_name, home_path, private_ip, email, project_identifier), 손으로 쓴 매처 `line_hits`, `EXCLUDED_DIRS`(+`target`), `scan(root) -> Vec<Hit{rel, line, name}>` |
+| `sanitize_check.py`의 `main` | `src/bin/sanitize_check.rs`: 인자 하나면 그 root(비엄격 resolve), 없으면 실행 파일의 스킬 폴더. `rel:n: name` 줄들과 `SANITIZE OK (0 hits)`/`SANITIZE FAIL (N hits)`, exit 0/1 |
+| `package_manifest.py`의 상수, `inventory`, `build`, `package_version`, `diff` | `src/manifest.rs`: `MANIFEST`, `MANIFEST_VERSION`, `PACKAGE_NAME`, `INVENTORY_EXCLUDES`(+`target`), `inventory`, `build -> Value`(키 순서 그대로), `package_version`, `diff`(항목 비교는 `py_eq`) |
+| `package_manifest.py`의 `main` | `src/bin/package_manifest.rs`: `--check`는 어느 자리든, 나머지 첫 인자가 root. `MANIFEST MISSING: …` / `MANIFEST OK (N files)` / `MANIFEST MISMATCH: …` / `MANIFEST written (N files)`; 쓰기는 indent 2 + 줄바꿈. `SystemExit` 문구(심볼릭 링크·특수 파일, version 없음)는 stderr, exit 1 |
+| `smoke_install.py`의 `SKIP`, `copy_package`, `tempfile.mkdtemp` | `src/install.rs`: `SKIP`(+`target`), `copy_tree`(링크를 따라가는 `shutil.copytree`), `copy_binaries`(`pm`, `check_campaign` → 사본 `target/release/`), `make_temp_dir`(`libc::mkdtemp`) |
+| `smoke_install.py`의 `Smoke`, `main` | `src/bin/smoke_install.rs`: 단계·단계 이름·`FAIL` 기록(`status, step, detail, passed`)·마지막 `PASS` 기록과 `SMOKE-PASS`·`--keep`·`kept: …`(stderr) 보존. `fail`의 `sys.exit(1)` + `finally`는 `Result`로 올려 임시 폴더를 지운 뒤 exit 1 |
+| `subprocess.run(..., input=, timeout=300)` | `src/proc.rs`의 `capture_input`(새 함수, stdin 파이프에 입력을 쓰고 닫음). `capture`는 `capture_input(.., None, ..)` |
+| `tests/test_package.py` 12건 | `tests/package.rs` 12건(아래 표) |
+
+| 원본(`tests/test_package.py`) | Rust(`tests/package.rs`) |
+|---|---|
+| `RootDetection.test_root_for_each_install_place` | `root_for_each_install_place` |
+| `RootDetection.test_env_overrides_root` | `env_overrides_root` |
+| `Init.test_dry_run_writes_nothing` | `dry_run_writes_nothing` |
+| `Init.test_apply_then_again_keeps_everything` | `apply_then_again_keeps_everything` |
+| `Init.test_existing_hook_file_is_not_modified` | `existing_hook_file_is_not_modified` |
+| `Init.test_codex_hook_points_at_the_skill` | `codex_hook_points_at_the_skill` |
+| `Init.test_laid_template_passes_lint` | `laid_template_passes_lint` |
+| `Distribution.test_sanitize_has_no_hits` | `sanitize_has_no_hits` |
+| `Distribution.test_sanitize_catches_planted_identifiers` | `sanitize_catches_planted_identifiers` |
+| `Distribution.test_manifest_matches_tree` | `manifest_matches_tree`(MANIFEST가 없으면 원본 `skipTest`처럼 통과로 넘어간다) |
+| `Distribution.test_versions_agree` | `versions_agree`(+ `Cargo.toml` `[package] version`과 `CARGO_PKG_VERSION`) |
+| `Distribution.test_install_smoke` | `install_smoke` |
+
+`Installed`는 패키지(`CARGO_MANIFEST_DIR`)를 `SKIP`을 빼고 복사한 뒤 `CARGO_BIN_EXE_pm`·`CARGO_BIN_EXE_check_campaign`을 사본 `target/release/`에 둔다. sanitize·manifest·smoke는 `CARGO_BIN_EXE_*`로 부른다.
+
+### sanitize 매처 (정규식 없이)
+
+- site_name·project_identifier: 대안 문자열(문자 클래스 `[_-]`는 두 대안으로 펼침)을 ASCII 대소문자 무시로 찾는다. 소스에는 조각으로 써서 자기 자신에 걸리지 않는다.
+- home_path: `/home/` 뒤 `[a-z0-9_-]`의 최대 연속이 `[a-z_]`로 시작하고 바로 뒤가 `/`.
+- private_ip: 앞 글자가 `[0-9.]`가 아닌 시작 위치에서 `10.D` | `172.(1[6-9]|2d|3[01])` | `192.168`, 뒤에 `.D.D`; `D`는 숫자 최대 연속 1–3개(숫자와 `.`이 겹치지 않으므로 역추적 결과와 같다).
+- email: `@`마다 앞 글자가 `[A-Za-z0-9._%+-]`이고, `@` 뒤가 `example.(invalid|com|org)` + 단어 경계가 아니며, `@` 뒤 `[A-Za-z0-9.-]` 최대 연속 안의 1번 이후 위치에 `.` + ASCII 글자 2개가 있다. 단어 경계의 단어 글자는 `char::is_alphanumeric` 또는 `_`.
+- 걷기: 이름 정렬(부분 경로 목록 순), 디렉터리 심볼릭 링크는 나열만 하고 내려가지 않음, 파일 링크는 읽음, NUL 바이트가 있으면 건너뜀, UTF-8 대체 디코드 후 `splitlines`.
+- 기준선 대조: 기준선 패턴에 같은 64줄(경계 IP, 172.15/172.32, 4자리 옥텟, home 아래 이름이 `_`·숫자로 시작하는 경우, `example.comx.io`·`example.com-x`·`example.comé`·결합 문자, 대소문자 변형, `[_-]` 변형 등)을 넣어 뽑은 기대값을 `sanitize::tests::patterns_match_like_the_baseline`에 두었다. 심어 둔 파일·링크·NUL 파일·`target/` 하위 파일이 있는 폴더에서 두 판의 출력은 `target/` 줄(의도한 변경 6)만 다르다.
+
+### 보존한 특이 동작
+
+- `package_manifest`의 `inventory`는 경로 문자열 정렬(`a-b/x`가 `a/x`보다 앞), 걷기는 폴더마다 이름 정렬. 심볼릭 링크·특수 파일이 있으면 그 상대 경로를 적고 exit 1.
+- `diff`는 `<version>`을 맨 앞에, 그다음 다른 경로들을 정렬해서 낸다. `inventory_excludes` 값은 비교하지 않는다(기준선이 쓴 MANIFEST도 Rust 판의 `--check`를 통과하고 그 반대도 같다).
+- smoke의 단계 이름(`"lint "`처럼 인자 없는 꼬리 공백 포함), 실패 detail의 마지막 2000/3000자, `metrics.get("totals", metrics)`.
+
+### 의도한 변경 적용 지점
+
+- 변경 1: smoke와 시험이 부르는 명령은 사본의 `target/release/pm`, `target/release/check_campaign`. 훅 경로 단언은 `.claude/skills/progress-monitor/target/release/pm`(claude), `.agents/skills/progress-monitor/target/release/pm stop-hook --harness codex`(codex).
+- 변경 2: 기본 root는 실행 파일의 스킬 폴더(`Paths::discover().skill_dir`).
+- 변경 3: 이 cell에서 `SKILL.md` metadata `version`과 README의 `배포 버전 **…**`만 2.0.0으로 올렸다(`versions_agree`와 `manifest_matches_tree`가 이 cell의 확인 조건이라서). 나머지 문서 갱신은 c21.
+- 변경 5: `PACKAGE_MANIFEST.json`을 Rust `package_manifest`로 다시 썼다(c21에서 최종 재생성).
+- 변경 6: `target`을 sanitize `EXCLUDED_DIRS`, manifest `INVENTORY_EXCLUDES`(끝), 설치 복사 `SKIP`에 더했다. smoke는 자기 실행 파일과 같은 폴더의 `pm`·`check_campaign`을 사본에 복사하고 없으면 step `install`의 FAIL로 끝난다.
+- 그 밖: c11 절의 대조 대상 문구 한 곳에 project_identifier 패턴에 걸리는 이름이 있어 "호스트 프로젝트"로 바꿨다(sanitize 0 hits 유지).
+
+### 알려진 차이(지원 범위 밖)
+
+- sanitize의 `\d`는 ASCII 숫자만, 대소문자 무시는 ASCII만 접는다(오케스트레이터 결정). 기준선은 유니코드 10진 숫자(예: U+0663)와 U+212A(Kelvin)→k, U+017F(long s)→s도 맞췄다. 이 입력은 지원 범위 밖이며 `digits_and_case_folding_are_ascii`가 이 판의 동작을 고정한다.
+- email 단어 경계의 단어 글자: Rust `is_alphanumeric`은 Other_Alphabetic 결합 부호(일부 Mn/Mc)를 글자로 본다. 기준선 `\w`는 이것들을 글자로 보지 않는다. U+0301 같은 일반 결합 부호는 둘 다 글자가 아니다.
+- smoke에서 예상하지 못한 오류(하위 프로세스 시간 초과, JSON이 아닌 lint 출력, 없는 키)는 기준선의 traceback 대신 stderr 한 줄과 exit 1. 판정(실패·exit 1·임시 폴더 삭제)은 같다. stdin 입력이 없는 하위 프로세스의 stdin은 `/dev/null`.
+- 시험과 smoke는 기본 `target/` 위치를 전제로 한다. `CARGO_TARGET_DIR`를 바꾸면 기본 root(실행 파일 세 단계 위)가 패키지가 아니게 된다.
+
+### 검사
+
+- `cargo build --locked`, `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`: 통과(자기 확인).
+- `rm -rf target/release && cargo test --locked`: lib 단위 14건 + 통합 62건(package 12, rules 19, final_run 4, transitions 19, hook 8) 통과(자기 확인).
+- `target/debug/sanitize_check`: `SANITIZE OK (0 hits)`. `package_manifest --check`: `MANIFEST OK`. `smoke_install`: `SMOKE-PASS`. 바이너리가 옆에 없는 smoke: step `install` FAIL, exit 1.
+- manifest 대조: 기준선 트리 사본 두 개에 기준선과 Rust 판으로 각각 쓴 MANIFEST는 `inventory_excludes`의 `target`만 다르고, 서로의 `--check`를 통과한다. 파일 추가·버전 변경·MANIFEST 없음·심볼릭 링크의 출력과 종료 코드도 기준선 문구와 같다.
+
+판정: **COMPLETE** (`sanitize_check`, `package_manifest`, `smoke_install`, `tests/test_package.py` 12건). `.py` 삭제·문서 나머지·MANIFEST 최종 재생성은 c21의 몫이다.

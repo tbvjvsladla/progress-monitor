@@ -1,14 +1,15 @@
 {
   "manifest_version": "1.0.0",
   "package": "progress-monitor",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "inventory_excludes": [
     "PACKAGE_MANIFEST.json",
     ".git",
     "__pycache__",
-    ".cache"
+    ".cache",
+    "target"
   ],
-  "file_count": 38,
+  "file_count": 75,
   "files": [
     {
       "path": ".gitattributes",
@@ -18,9 +19,21 @@
     },
     {
       "path": ".gitignore",
-      "bytes": 87,
+      "bytes": 117,
       "mode": "0644",
-      "sha256": "3a97dade81c9d9d5266626b8b5a8eab3d146866d980f61e466ef4c8867e59136"
+      "sha256": "0d28d3a9ccd584c4c73b74958e50846e0a3f22d5cb962267219b2de3bf0df14a"
+    },
+    {
+      "path": "Cargo.lock",
+      "bytes": 5723,
+      "mode": "0644",
+      "sha256": "1f87d80c32ba801eecb90b57820a498838a627d8ce5adae3e7cfe8948416164b"
+    },
+    {
+      "path": "Cargo.toml",
+      "bytes": 369,
+      "mode": "0644",
+      "sha256": "1fd3351690b201d29e4824ad8ac5c21e9c9bae3325fef65d5a5cb541100e4aeb"
     },
     {
       "path": "LICENSE",
@@ -29,16 +42,22 @@
       "sha256": "e4defeee624b70e9efb4e86bfec069364a80edaef14ac78a612858994e3908a5"
     },
     {
+      "path": "PORTING.md",
+      "bytes": 31802,
+      "mode": "0644",
+      "sha256": "65194b94e54580c232124a95e420a07f40f6fb5afbeaef221cd23e11cc4f5018"
+    },
+    {
       "path": "README.md",
       "bytes": 16288,
       "mode": "0644",
-      "sha256": "fea93a4c3dcd4fb63366acca091b6eee0f97c76cd98328bbc170f7e35b5f0c01"
+      "sha256": "7d40dce5897e1bb8e186027fcafcd46694054832ab2d446fab1f45e6a83f69b5"
     },
     {
       "path": "SKILL.md",
       "bytes": 9651,
       "mode": "0644",
-      "sha256": "b175f817e7efc4bdb9f45515fed869cc19a65f3a8e522d46790dcd4eb0daa6cd"
+      "sha256": "df222576f8d1b3dfd89b8014e39e57598e8b2f3b712a622bc00cfc2fb12e4a81"
     },
     {
       "path": "assets/campaigns/README.md",
@@ -227,6 +246,204 @@
       "sha256": "daa0dcf8c303419d50e39f8fa8cdbac87034f96db5f0427622a861756752ffab"
     },
     {
+      "path": "src/bin/check_campaign.rs",
+      "bytes": 293,
+      "mode": "0644",
+      "sha256": "dabf55a7642de132e74270978e55e7cfe40fc7cd1975ce1fbad66f83887baca4"
+    },
+    {
+      "path": "src/bin/package_manifest.rs",
+      "bytes": 1886,
+      "mode": "0644",
+      "sha256": "d010a05462f6f1e474bf9716ac7cee10605d00b890bcd4e2b0572ad6a149d4f7"
+    },
+    {
+      "path": "src/bin/pm.rs",
+      "bytes": 570,
+      "mode": "0644",
+      "sha256": "6e2b2b171f16dae555e2a8e176854f3e0be0b33e371ee92c7961f634718f9f7c"
+    },
+    {
+      "path": "src/bin/sanitize_check.rs",
+      "bytes": 1269,
+      "mode": "0644",
+      "sha256": "11cd5987810d847332cd6d6d4e86bcc3148139ac0cebd1e84ce92c66f8c9fdf2"
+    },
+    {
+      "path": "src/bin/smoke_install.rs",
+      "bytes": 14320,
+      "mode": "0644",
+      "sha256": "1fd79235f1cb46482a3fc3188d578f2f3f64dab077dda09bdbb67d3577e7688b"
+    },
+    {
+      "path": "src/campaign.rs",
+      "bytes": 27136,
+      "mode": "0644",
+      "sha256": "1f399ceba093883c89d9c27384276517273a737f7f5c2d5ea73f6791c7bf40ba"
+    },
+    {
+      "path": "src/checks.rs",
+      "bytes": 18692,
+      "mode": "0644",
+      "sha256": "8407684cc1e7a384eed18d994cfe8d2a87103976887dbcb76c66f9b60bfdfb06"
+    },
+    {
+      "path": "src/cli.rs",
+      "bytes": 18913,
+      "mode": "0644",
+      "sha256": "08a649238b81006d3c58d673aae4f290e6bcf2a0bede60b6bf31477167c03782"
+    },
+    {
+      "path": "src/commands.rs",
+      "bytes": 61076,
+      "mode": "0644",
+      "sha256": "c3cb8b1f168fdff0ee5b62485fcdd14549ca76e6b021116f3bb84af73e5a1933"
+    },
+    {
+      "path": "src/error.rs",
+      "bytes": 1888,
+      "mode": "0644",
+      "sha256": "3aeaa0b9b8f3fe20e3be79aa9bfddaa7f61b334d07bc5d52b484de1753ef694b"
+    },
+    {
+      "path": "src/hook.rs",
+      "bytes": 10943,
+      "mode": "0644",
+      "sha256": "720365979a96d74299cccbfb911e7aa5331b499c80115f75a08daea3433b5f54"
+    },
+    {
+      "path": "src/init.rs",
+      "bytes": 5648,
+      "mode": "0644",
+      "sha256": "10ae86ee476c86a466afe75bffffae2d6c41063d257880470983d37970747d58"
+    },
+    {
+      "path": "src/install.rs",
+      "bytes": 2942,
+      "mode": "0644",
+      "sha256": "7574e8a09c972cf4d8a619b4c48ca127b4a97308d69da958d7b1ec3114fe6b6f"
+    },
+    {
+      "path": "src/jsonio.rs",
+      "bytes": 6685,
+      "mode": "0644",
+      "sha256": "6213e7fb893dd30cef0b8797c26381fac9535b5deae328315d5e95a98e5a9f82"
+    },
+    {
+      "path": "src/lib.rs",
+      "bytes": 2327,
+      "mode": "0644",
+      "sha256": "36592c1157ccd7008fc56523f0eeebeba0eb6aa4b6cf76c1d2865acae075169c"
+    },
+    {
+      "path": "src/lint/cli.rs",
+      "bytes": 12712,
+      "mode": "0644",
+      "sha256": "f62aebb8c79b0b4119831e0c2469ff416c232ac51da840fdf5f7278e9c061bd1"
+    },
+    {
+      "path": "src/lint/control.rs",
+      "bytes": 30366,
+      "mode": "0644",
+      "sha256": "e6a97f8d276c6fd1b8cb7d82655c6c5cd31c7b72680df281ce4e88d44d86f9c0"
+    },
+    {
+      "path": "src/lint/declaration.rs",
+      "bytes": 6911,
+      "mode": "0644",
+      "sha256": "242c51bc5ef58cb168ae99ab1ba04f7c2b35efa0ed8adf3a07e2a1fddd92db92"
+    },
+    {
+      "path": "src/lint/mod.rs",
+      "bytes": 8322,
+      "mode": "0644",
+      "sha256": "ef18950a5f4bc2b4a3430afa0c44666bb03ec31ab7e7ea2b31d8a806ab4a7d25"
+    },
+    {
+      "path": "src/lint/rules.rs",
+      "bytes": 30903,
+      "mode": "0644",
+      "sha256": "26ffdf1f464e035b5f3408243966e1d251dc34e8c93eb78dc5aef8a6b61de9aa"
+    },
+    {
+      "path": "src/lock.rs",
+      "bytes": 2099,
+      "mode": "0644",
+      "sha256": "f51ddc71eb2f037bd73b14a14bcbc67e0a793ba2d624397c5e438bce2d4bac78"
+    },
+    {
+      "path": "src/manifest.rs",
+      "bytes": 5561,
+      "mode": "0644",
+      "sha256": "ec6276801d0a8ce1a64cd7fa560ab31df2a499c919a24934941f2726b91edd21"
+    },
+    {
+      "path": "src/paths.rs",
+      "bytes": 5832,
+      "mode": "0644",
+      "sha256": "aee108a4e0fc4dab4108ff305e6801787dcf92f097a301c353681151e7a2ff43"
+    },
+    {
+      "path": "src/proc.rs",
+      "bytes": 8898,
+      "mode": "0644",
+      "sha256": "4d653548f46baedfac5db1a05d427eb8ebdb1d439654cb5c49b3d2f37b4d3238"
+    },
+    {
+      "path": "src/py.rs",
+      "bytes": 14083,
+      "mode": "0644",
+      "sha256": "571fb1aa957b05ce16439637c5a34d2388214a6ba310e1baff6ce9efc5b1bb6e"
+    },
+    {
+      "path": "src/sanitize.rs",
+      "bytes": 11832,
+      "mode": "0644",
+      "sha256": "3e07e87dc3fa05ccf570dc14893454ed8a5240d17061ce187b38b34fc53ab0b5"
+    },
+    {
+      "path": "src/status.rs",
+      "bytes": 20723,
+      "mode": "0644",
+      "sha256": "9cc3411c25a458a4ade95863f831b4b76f438dc241cf4af580dd6d865291748f"
+    },
+    {
+      "path": "src/time.rs",
+      "bytes": 9970,
+      "mode": "0644",
+      "sha256": "19e5ce14392e9d134fbb801336f490ca3bc165723be71e57596540f6a78e68d3"
+    },
+    {
+      "path": "tests/common/mod.rs",
+      "bytes": 20545,
+      "mode": "0644",
+      "sha256": "c0f1eef4636e82d52278c40a53af46b9a9370e53896a9322ec868c3340bee1e4"
+    },
+    {
+      "path": "tests/final_run.rs",
+      "bytes": 3906,
+      "mode": "0644",
+      "sha256": "b676887618b9fb7da567ad5354e054bcd3ecd269fc1d4892076f055e101c5f9f"
+    },
+    {
+      "path": "tests/hook.rs",
+      "bytes": 8024,
+      "mode": "0644",
+      "sha256": "e3ff755eee3757329f022e8cb873c237e19ab9519738a29b902315623a7cbd7d"
+    },
+    {
+      "path": "tests/package.rs",
+      "bytes": 11479,
+      "mode": "0644",
+      "sha256": "21227e9a2360294f664ded680f62bcbe08df997fc4adf0154b08143667c51833"
+    },
+    {
+      "path": "tests/rules.rs",
+      "bytes": 16679,
+      "mode": "0644",
+      "sha256": "464c45d1fb1b345e7eb8d38533ab92ad4c988f87b9dfd1188900f94ae51c9eb7"
+    },
+    {
       "path": "tests/test_package.py",
       "bytes": 7672,
       "mode": "0644",
@@ -237,6 +454,12 @@
       "bytes": 50105,
       "mode": "0644",
       "sha256": "3457963ab3a5433e6b518a77bde35ccc811e0b03522fdbda267c7ae2d3f4d298"
+    },
+    {
+      "path": "tests/transitions.rs",
+      "bytes": 18201,
+      "mode": "0644",
+      "sha256": "d2f0096403d11663649a19ea8c82a370101979bacb2bf21a6786f3a4a9010a01"
     }
   ]
 }

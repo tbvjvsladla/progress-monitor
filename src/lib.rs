@@ -18,12 +18,15 @@ pub mod commands;
 pub mod error;
 pub mod hook;
 pub mod init;
+pub mod install;
 pub mod jsonio;
 pub mod lint;
 pub mod lock;
+pub mod manifest;
 pub mod paths;
 pub mod proc;
 pub mod py;
+pub mod sanitize;
 pub mod status;
 pub mod time;
 
