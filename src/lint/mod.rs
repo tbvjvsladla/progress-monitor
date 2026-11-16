@@ -161,7 +161,7 @@ pub fn load_json(path: &Path) -> LintResult<Value> {
     let not_json =
         |reason: String| LintError::Unreadable(format!("{}: not JSON ({reason})", path.display()));
     let text = String::from_utf8(bytes).map_err(|e| not_json(e.to_string()))?;
-    jsonio::parse(&py::universal_newlines(&text)).map_err(not_json)
+    jsonio::parse(&py::universal_newlines(&text)).map_err(|e| not_json(e.to_string()))
 }
 
 /// A JSON object read from a file (control fixtures only).

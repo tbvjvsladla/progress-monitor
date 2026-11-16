@@ -121,7 +121,7 @@ pub fn cmd_open(camp: &mut Campaign, args: &Args) -> Out {
     if let Some(hours) = args.opt("--briefing-every-hours") {
         let hours = parse_float(hours)?;
         let value = if hours > 0.0 {
-            serde_json::Number::from_f64(hours).map_or(Value::Null, Value::Number)
+            crate::py::float_value(hours)
         } else {
             Value::Null
         };
@@ -168,9 +168,8 @@ pub fn cmd_open(camp: &mut Campaign, args: &Args) -> Out {
 
 /// A command-line float (checked by the parser already).
 pub fn parse_float(text: &str) -> Res<f64> {
-    strip(text)
-        .replace('_', "")
-        .parse::<f64>()
+    crate::py::py_float(text)
+        .ok_or(())
         .map_err(|_| PmError::usage(format!("invalid float value: {}", repr_str(text))))
 }
 
@@ -1011,7 +1010,7 @@ pub fn review_round(camp: &mut Campaign, cell: &Obj) -> Res<i64> {
         if eq_str(e.get("event"), "review") && e.get("cell").is_some_and(|c| py_eq(c, &name)) {
             match e.get("round") {
                 Some(Value::Bool(b)) => best = best.max(i64::from(*b)),
-                Some(r) if is_int(r) => best = best.max(r.as_i64().unwrap_or(0)),
+                Some(r) if is_int(r) => best = best.max(crate::py::int_saturating(r).unwrap_or(0)),
                 _ => {}
             }
         }
@@ -1023,9 +1022,23 @@ pub fn review_round(camp: &mut Campaign, cell: &Obj) -> Res<i64> {
 fn int_of(value: &Value) -> Res<i64> {
     match value {
         Value::Bool(b) => Ok(i64::from(*b)),
-        Value::Number(n) => Ok(n
-            .as_i64()
-            .unwrap_or_else(|| n.as_f64().unwrap_or(0.0).trunc() as i64)),
+        Value::Number(n) => match crate::py::int_saturating(value) {
+            Some(i) => Ok(i),
+            None => {
+                let x = crate::py::number_f64(n);
+                if x.is_nan() {
+                    Err(PmError::Internal(
+                        "ValueError: cannot convert float NaN to integer".into(),
+                    ))
+                } else if x.is_infinite() {
+                    Err(PmError::Internal(
+                        "OverflowError: cannot convert float infinity to integer".into(),
+                    ))
+                } else {
+                    Ok(x.trunc() as i64)
+                }
+            }
+        },
         Value::String(s) => strip(s).parse().map_err(|_| {
             PmError::Internal(format!(
                 "ValueError: invalid literal for int() with base 10: {}",
@@ -1590,8 +1603,8 @@ pub fn cmd_review_record(camp: &mut Campaign, args: &Args) -> Out {
         }
         _ => Value::from(3),
     };
-    let cap = match cap.as_i64() {
-        Some(c) if is_int(&cap) && c >= 1 => c,
+    let cap = match crate::py::int_saturating(&cap) {
+        Some(c) if c >= 1 => c,
         _ => {
             return Err(PmError::usage(
                 "campaign.json: review.round_cap must be a positive integer",
@@ -1610,8 +1623,11 @@ pub fn cmd_review_record(camp: &mut Campaign, args: &Args) -> Out {
         ],
     )?;
     let mut stopped = false;
-    let round = review["round"].as_i64().unwrap_or(0);
-    if round >= cap && truthy(&review["blocking"]) && !truthy(&review["clean"]) {
+    // round equals the expected int here (checked above), so it is a number
+    let round_reached = crate::py::Num::of(&review["round"])
+        .and_then(|r| r.compare(crate::py::Num::Int(i128::from(cap))))
+        .is_some_and(|o| o != std::cmp::Ordering::Less);
+    if round_reached && truthy(&review["blocking"]) && !truthy(&review["clean"]) {
         set_cell_state(camp, name, "stopped")?;
         camp.save_decl()?;
         camp.emit(
@@ -1765,8 +1781,12 @@ pub fn cmd_hitl_answer(camp: &mut Campaign, args: &Args) -> Out {
 }
 
 pub fn cmd_event(camp: &mut Campaign, args: &Args) -> Out {
-    let data = crate::jsonio::parse(args.pos(0))
-        .map_err(|e| PmError::usage(format!("the event is not JSON ({e})")))?;
+    let data = crate::jsonio::parse(args.pos(0)).map_err(|e| match e {
+        crate::jsonio::JsonError::Decode(text) => {
+            PmError::usage(format!("the event is not JSON ({text})"))
+        }
+        crate::jsonio::JsonError::Other(text) => PmError::Internal(text),
+    })?;
     let mut data = match data {
         Value::Object(m) if nonempty_str(m.get("event")) => m,
         _ => return Err(PmError::usage("the event needs an event name")),

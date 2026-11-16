@@ -88,7 +88,7 @@ pub fn resolve(path: &Path) -> Result<PathBuf, String> {
 /// The fixed places of one run.
 #[derive(Clone, Debug)]
 pub struct Paths {
-    /// Folder of the running executable (symbolic links resolved).
+    /// The running executable (symbolic links resolved).
     pub exe: PathBuf,
     /// `<skill>/target/<profile>/<bin>` → `<skill>`.
     pub skill_dir: PathBuf,

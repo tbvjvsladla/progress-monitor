@@ -9,8 +9,8 @@
 | 원본(`scripts/pm.py`) | Rust |
 |---|---|
 | `SKILL_DIR`, `project_root`, `REPO`, `skill_command`, `PM` | `src/paths.rs`: `Paths::discover`(심볼릭 링크를 푼 `current_exe`에서 세 단계 위), `project_root`, `pm_command`, `tool_command`, `shown`, `resolve`(비엄격 `Path.resolve`), `join`/`normalise`(pathlib식 어휘 결합) |
-| `now`, `stamp`, `parse_time` | `src/time.rs`: `Moment { utc_us, offset_us }`, `stamp`, `parse_time`(Python 3.12 `fromisoformat`의 실사용 부분집합) |
-| `read_json`, `write_json`, `json.dumps(...)` 세 형식, `hashlib.sha256` | `src/jsonio.rs`: `read_json`, `write_json`, `pretty`(indent 2), `compact`(`", "`·`": "`), `sorted_compact`(재귀 키 정렬), `digest` |
+| `now`, `stamp`, `parse_time` | `src/time.rs`: `Moment { utc_us, offset_us }`, `stamp`, `parse_time`(Python 3.12 C 구현 `datetime.fromisoformat` 이식: 구분자 위치 규칙, ISO 주 날짜, `HH[:MM[:SS[.f]]]` 파서, 오프셋의 소수 초), `timedelta_us`(`timedelta(...)`의 정수·float 환산과 범위 오류) |
+| `read_json`, `write_json`, `json.dumps(...)` 세 형식, `hashlib.sha256` | `src/jsonio.rs`: `parse`(`json.loads` 이식, 오류 문구 포함), `read_json`, `write_json`, `pretty`(indent 2), `compact`(`", "`·`": "`), `sorted_compact`(재귀 키 정렬), `digest`, `encodable`(UTF-8 인코딩 실패 판정) |
 | Python 값 의미(truthiness, `==`, `isinstance(int)`, `str`/`repr`, `splitlines`, `strip`, `round`, `float` repr) | `src/py.rs` |
 | `alive`, `git`, `execute`, `Campaign.probe`의 subprocess | `src/proc.rs`: `alive`, `git`, `probe`, `execute`(`/bin/sh -c`, `setsid`, stdin null, stdout+stderr 한 로그, 시간 초과 시 `killpg(SIGKILL)`), `node_name` |
 | `Refused`, `Usage`, 그 밖 예외 | `src/error.rs`: `PmError::{Refused, Usage, Internal}` (exit 1 / 2 / 2) |
@@ -43,24 +43,46 @@ prepare 계획(`commands/` 하위 폴더, `consts.rs`, `gates.rs`)보다 파일 
 2. 스킬 폴더: `Paths::discover`가 `current_exe`를 canonicalize하고 세 단계 위를 스킬 폴더로 본다. 그 위의 프로젝트 루트 규칙은 같다.
 7. CLI 문구: 사용법·오류 문구, `prog` 이름은 바뀌었다. 약어는 받지 않는다. 사용법 오류는 stderr 한 줄 이상과 exit 2, `-h/--help`는 stdout과 exit 0. JSON `error`의 예외 문구(예: `the event is not JSON (...)` 괄호 안)는 바뀔 수 있다.
 
-### 알려진 차이(지원 범위 밖)
+### 회차 1 검토 지적의 해소 (attempt 2)
 
-- 임의 정밀도 정수(u64 밖), `NaN`/`Infinity`, 범위 밖 float(`1e400`) JSON 입력은 읽지 못해 `not JSON` 사용법 오류(exit 2)가 된다.
-- 고립 서로게이트(`"\ud800"`)가 든 JSON도 읽지 못한다.
-- 이름(cell·group·check·phase)이 문자열이 아닌 선언은 `str()` 문자열로 비교한다(check_campaign이 거르는 입력).
-- `--briefing-every-hours`의 `inf` 값은 저장하지 못해 null이 된다.
-- 잘못된 UTF-8 바이트의 대체 문자 개수가 Python `errors="replace"`와 다를 수 있다(검사 로그 판정에만 쓰인다).
+- r1-K1·K2 JSON 완전 보존: `jsonio::parse`가 `json.loads`를 직접 이식한다. 숫자는 serde_json `arbitrary_precision`으로 출력 문구를 그대로 들고 다닌다. 정수는 모든 자리(4300자리 초과는 기준선의 `ValueError`), `-0`은 `0`, float는 올바른 반올림으로 읽어 Python `repr`로 쓴다(`-943305.0469559873` 왕복, `1e400` → `Infinity`). `NaN`·`Infinity`·`-Infinity`를 읽고 쓴다. 고립 서로게이트 `\udxxx`는 평면 16 사용자 영역 U+10F000–U+10F7FF의 대리 문자로 보존하고, 파일·stdout·journey·해시로 내보낼 때 기준선과 같은 `UnicodeEncodeError`(위치 포함)가 된다. `write_json`은 이때 빈 `.tmp`를 남기고, 일반 명령의 stdout 출력이면 stdout은 비고 exit 1이다. `--briefing-every-hours inf`는 `Infinity`로 저장되고, 그 뒤 `briefing_due`는 기준선처럼 `OverflowError`가 된다. 중첩 9997단 초과는 `RecursionError`. 오류 문구도 `JSONDecodeError`와 같다(자동 대조 11240건 일치).
+- r1-K3: `proc::capture_bytes`의 시간 제한이 자식 종료와 두 파이프 EOF를 함께 덮는다(`communicate(timeout)`). 초과면 자식만 죽이고 거둔다. git 시간 초과 문구는 `Command '[...]' timed out after 120 seconds`, 실행 실패는 `[Errno N] ...: 'git'`.
+- r1-K4: `env_probe`와 `git` 출력은 엄격한 UTF-8(stdout 먼저, stderr도)로 푼다. 실패는 기준선과 같은 `UnicodeDecodeError: 'utf-8' codec can't decode ...` 문구로 `ok:false`, exit 2.
+- r1-K5: `init`에서 `Usage` 밖의 오류(OS 오류)는 stdout 없이 stderr의 traceback 끝줄과 exit 1.
+- r1-K6: `timedelta(minutes=phase_minutes)`를 i128로 계산하고 기준선의 두 `OverflowError`(`days=N; must have magnitude <= 999999999`, `Python int too large to convert to C int`)를 같은 경계에서 낸다. `briefing.every_hours`의 float 환산(반올림 half-even)과 `inf`의 오류도 같은 함수(`time::timedelta_us`)를 쓴다.
+- r1-K7: `parse_time`이 CPython 3.12 C 구현을 그대로 따른다(ISO 주 날짜, `05.+00:00`, 오프셋 앞 공백, 오프셋 소수 초와 `+00:00:00.5` → UTC, `YYYY-Www-HH` 모호성, 아무 구분자 1글자).
+- r1-K10: `PM_LOCK_WAIT_S`와 `--briefing-every-hours`를 `py::py_float`(Python `float(str)`: 유니코드 숫자·공백, 숫자 사이 밑줄, `inf`/`infinity`/`nan` 대소문자)로 읽는다.
+- r1-B2: `Paths::exe` 주석을 실행 파일 경로로 고쳤다.
+- 정수 예산·`round_cap`·`review_round`는 i64 범위 밖 정수도 받는다(i64로 포화). 깊은 JSON을 재귀로 다루므로 `pm`은 명령을 512 MiB 스택 스레드에서 돌린다(가상 예약만 한다).
+
+### 남은 차이 (의도한 변경 1~7 밖)
+
+- 들여쓰기 출력(`json.dumps(indent=2)`, 기준선은 순수 Python 인코더)의 `RecursionError`: 기준선은 깊이 약 1000 이상의 값을 stdout·파일로 쓰지 못하는데(예: `event`에 3000단 배열, exit 1 traceback) Rust는 쓴다. 읽기 쪽 한계(9997단)도 기준선의 호출 깊이에 따라 몇 단 다를 수 있다.
+- 이름(cell·group·check·phase)이 문자열이 아닌 선언은 `str()` 문자열로 비교한다(기준선은 `1 != "1"`). check_campaign이 거르는 입력이다.
+- i128 밖 정수의 산술·비교는 float로 한다(입출력 문구는 보존).
+- 고립 서로게이트의 대리 문자와 같은 실제 문자(U+10F000–U+10F7FF)가 함께 있으면 구분하지 못한다. 인자·환경 변수의 비 UTF-8 바이트(기준선은 surrogateescape)는 U+FFFD로 읽는다.
+- 검사 로그의 `errors="replace"` 대체 문자 개수: 대조하지 않았다(판정에는 `expect` 포함 여부만 쓴다).
+- `init`의 OS 오류 traceback 끝줄 문구(stderr)는 Rust 오류 문구다.
 
 ### 검사
 
-- `cargo build --locked`, `cargo build --release --locked`: 통과.
-- `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`: 통과(자기 확인).
-- `cargo test --lib`: 단위 시험 8건 통과(직렬화 바이트, SHA-256, float repr, splitlines, 시각 왕복, 어휘 경로).
-- 오라클(`PM_BIN=target/release/pm`, `PM_LINT_BIN`=기준선 lint 래퍼): `Ran 50 tests ... OK`.
-- `keycmp.sh`(A=기준선, B=Rust): `KEYCMP-OK`(영수증 `key_sha256`과 `state_digest`가 같다).
-- 직접 대조(합성 인스턴스, 53단계: open·phase·gate·review·cell add/move/cancel/stop/resume·hitl·event·brief·metrics·explore·check run/invalidate·final·monitor reset·오류 경로, 단계마다 codex stop-hook): 시각·pid·소요 시간·실행 명령 경로를 가린 뒤 stdout·종료 코드·인스턴스 파일이 모두 같고, 다른 곳은 `event nope`의 JSON 오류 괄호 문구 하나(의도한 변경 7). `init` 출력의 차이는 훅 명령과 "틀 검사:" 줄(의도한 변경 1)뿐.
+환경: rustc 1.100.0 / cargo 1.100.0, Python 3.12.3(기준선), aarch64. 원시 근거: 캠페인 인스턴스의 `cells/c10-pm/evidence/`(대조 스크립트, 생성한 사례 파일, 결과 기록).
 
-판정: **COMPLETE** (`scripts/pm.py`의 모든 명령). `check_campaign` 등 나머지 바이너리와 `tests/*.rs`는 다른 cell(c11·c12·c20)의 몫이다.
+| 검사 | 결과 | 종료 코드 |
+|---|---|---|
+| `cargo build --locked`, `cargo build --release --locked` | PASS | 0 |
+| `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings` (자기 확인) | PASS | 0 |
+| `cargo test --locked --no-fail-fast` (단위 21건 포함 전체) | PASS | 0 |
+| 오라클 `PM_BIN=target/release/pm PM_LINT_BIN=target/release/check_campaign` | PASS (Ran 50, OK) | 0 |
+| `keycmp.sh` | PASS (KEYCMP-OK) | 0 |
+| `package_manifest --check` (MANIFEST 재생성 후) | PASS (75 files) | 0 |
+| `fromisoformat` 자동 대조 30526건(기준선 Python 3.12.3 결과와 UTC·오프셋 비교) | PASS (불일치 0) | 0 |
+| `json.loads`/`json.dumps` 자동 대조 13373건(값 출력·오류 종류·`JSONDecodeError` 문구) | PASS (불일치 0) | 0 |
+| 검토 재현 K1·K2·K3·K4·K5·K6·K10을 기준선과 나란히 실행(stdout·exit·인스턴스 파일) | PASS (시각 외 같음) | 0 |
+| 53단계 합성 인스턴스 직접 대조(attempt 1) | NOT_RUN (이번 회차에 다시 돌리지 않음, 오라클로 대신 확인) | - |
+| 묶음 검사(gate) | NOT_RUN (gate의 몫) | - |
+
+판정: **INCOMPLETE** — `scripts/pm.py`의 모든 명령을 이식했고 회차 1 차단 지적은 모두 고쳤지만, 위 "남은 차이"가 의도한 변경 밖으로 남아 있다.
 
 ## c11-lint — `scripts/check_campaign.py` → `src/lint/` + `src/bin/check_campaign.rs`
 

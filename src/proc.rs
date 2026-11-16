@@ -10,8 +10,10 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use crate::error::os_error_name;
-use crate::py::{strip, universal_newlines};
+use std::sync::mpsc;
+
+use crate::error::{os_error_name, PmError, Res};
+use crate::py::{repr_str, strip, universal_newlines, utf8_error_text};
 use crate::time::{now, seconds_between, stamp};
 use crate::TOOL;
 
@@ -58,10 +60,25 @@ pub enum Captured {
     Failed(std::io::Error),
 }
 
-fn read_all(mut source: impl Read + Send + 'static) -> thread::JoinHandle<Vec<u8>> {
+/// What [`capture_bytes`] saw: the undecoded output.
+pub enum CapturedBytes {
+    Done {
+        status: ExitStatus,
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+    },
+    Timeout,
+    Failed(std::io::Error),
+}
+
+fn read_all(
+    mut source: impl Read + Send + 'static,
+    done: mpsc::Sender<()>,
+) -> thread::JoinHandle<Vec<u8>> {
     thread::spawn(move || {
         let mut buf = Vec::new();
         let _ = source.read_to_end(&mut buf);
+        let _ = done.send(());
         buf
     })
 }
@@ -88,14 +105,43 @@ pub fn capture(command: Command, timeout: Duration) -> Captured {
 }
 
 /// [`capture`] with `input` written to the child's stdin (then closed) when given.
-pub fn capture_input(mut command: Command, input: Option<&str>, timeout: Duration) -> Captured {
+/// Output is decoded leniently (invalid UTF-8 becomes U+FFFD).
+pub fn capture_input(command: Command, input: Option<&str>, timeout: Duration) -> Captured {
+    match capture_bytes(command, input, timeout) {
+        CapturedBytes::Done {
+            status,
+            stdout,
+            stderr,
+        } => {
+            let text = |b: &[u8]| universal_newlines(&String::from_utf8_lossy(b));
+            Captured::Done {
+                status,
+                stdout: text(&stdout),
+                stderr: text(&stderr),
+            }
+        }
+        CapturedBytes::Timeout => Captured::Timeout,
+        CapturedBytes::Failed(err) => Captured::Failed(err),
+    }
+}
+
+/// `subprocess.run(..., capture_output=True, timeout=...)`: the time limit covers
+/// the child's exit and the end of both pipes (a background grandchild holding a
+/// pipe open runs into it). On timeout the child is killed and reaped; the
+/// grandchildren are left alone, as the baseline left them.
+pub fn capture_bytes(
+    mut command: Command,
+    input: Option<&str>,
+    timeout: Duration,
+) -> CapturedBytes {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     if input.is_some() {
         command.stdin(Stdio::piped());
     }
+    let deadline = Instant::now().checked_add(timeout);
     let mut child = match command.spawn() {
         Ok(child) => child,
-        Err(err) => return Captured::Failed(err),
+        Err(err) => return CapturedBytes::Failed(err),
     };
     let feeder = match (child.stdin.take(), input) {
         (Some(mut stdin), Some(text)) => {
@@ -106,34 +152,82 @@ pub fn capture_input(mut command: Command, input: Option<&str>, timeout: Duratio
         }
         _ => None,
     };
-    let out = child.stdout.take().map(read_all);
-    let err = child.stderr.take().map(read_all);
-    let waited = wait_until(&mut child, Some(Instant::now() + timeout));
+    let (tx, rx) = mpsc::channel();
+    let out = child.stdout.take().map(|s| read_all(s, tx.clone()));
+    let err = child.stderr.take().map(|s| read_all(s, tx.clone()));
+    drop(tx);
+    let mut open_pipes = usize::from(out.is_some()) + usize::from(err.is_some());
+    let mut timed_out = false;
+    while open_pipes > 0 {
+        let waited = match deadline {
+            Some(limit) => rx.recv_timeout(limit.saturating_duration_since(Instant::now())),
+            None => rx.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected),
+        };
+        match waited {
+            Ok(()) => open_pipes -= 1,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                timed_out = true;
+                break;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    let waited = if timed_out {
+        Ok(None)
+    } else {
+        wait_until(&mut child, deadline)
+    };
     if let Some(feeder) = feeder {
         if !matches!(waited, Ok(Some(_))) {
             let _ = child.kill();
         }
-        let _ = feeder.join();
+        if !timed_out {
+            let _ = feeder.join();
+        }
     }
     match waited {
         Ok(Some(status)) => {
-            let text = |h: Option<thread::JoinHandle<Vec<u8>>>| {
-                h.and_then(|h| h.join().ok())
-                    .map(|b| universal_newlines(&String::from_utf8_lossy(&b)))
-                    .unwrap_or_default()
+            let bytes = |h: Option<thread::JoinHandle<Vec<u8>>>| {
+                h.and_then(|h| h.join().ok()).unwrap_or_default()
             };
-            Captured::Done {
+            CapturedBytes::Done {
                 status,
-                stdout: text(out),
-                stderr: text(err),
+                stdout: bytes(out),
+                stderr: bytes(err),
             }
         }
         Ok(None) => {
             let _ = child.kill();
             let _ = child.wait();
-            Captured::Timeout
+            CapturedBytes::Timeout // the reader threads end with the last writer
         }
-        Err(err) => Captured::Failed(err),
+        Err(err) => CapturedBytes::Failed(err),
+    }
+}
+
+/// `text=True` decoding of captured output: strict UTF-8 with universal newlines,
+/// stdout first; a bad byte is the baseline's uncaught `UnicodeDecodeError`.
+fn decode_strict(bytes: &[u8]) -> Res<String> {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => Ok(universal_newlines(text)),
+        Err(err) => Err(PmError::Internal(format!(
+            "UnicodeDecodeError: {}",
+            utf8_error_text(bytes, err)
+        ))),
+    }
+}
+
+/// `str(OSError)` as the baseline wrote it for a failed spawn: `[Errno N] text: 'program'`.
+fn spawn_error_text(err: &std::io::Error, program: &str) -> String {
+    match err.raw_os_error() {
+        Some(code) => {
+            // SAFETY: strerror returns a NUL-terminated static or thread-local message.
+            let text = unsafe { std::ffi::CStr::from_ptr(libc::strerror(code)) }
+                .to_string_lossy()
+                .into_owned();
+            format!("[Errno {code}] {text}: {}", repr_str(program))
+        }
+        None => err.to_string(),
     }
 }
 
@@ -145,42 +239,68 @@ pub fn exit_code(status: ExitStatus) -> i64 {
     }
 }
 
-/// `git -C <root> <args>`: (exit code, stripped stdout); a failure to run is (1, message).
-pub fn git(root: &Path, args: &[&str]) -> (i64, String) {
+/// `git -C <root> <args>`: (exit code, stripped stdout); a failure to run or a
+/// timeout is (1, the exception text). Output that is not UTF-8 is an error.
+pub fn git(root: &Path, args: &[&str]) -> Res<(i64, String)> {
     let mut command = Command::new("git");
-    command.arg("-C").arg(root).args(args).stdin(Stdio::null());
-    match capture(command, Duration::from_secs(120)) {
-        Captured::Done { status, stdout, .. } => (exit_code(status), strip(&stdout).to_string()),
-        Captured::Timeout => (1, "git timed out after 120 seconds".to_string()),
-        Captured::Failed(err) => (1, err.to_string()),
+    command.arg("-C").arg(root).args(args);
+    match capture_bytes(command, None, Duration::from_secs(120)) {
+        CapturedBytes::Done {
+            status,
+            stdout,
+            stderr,
+        } => {
+            let out = decode_strict(&stdout)?;
+            decode_strict(&stderr)?;
+            Ok((exit_code(status), strip(&out).to_string()))
+        }
+        CapturedBytes::Timeout => {
+            let root = root.display().to_string();
+            let argv: Vec<String> = ["git", "-C", root.as_str()]
+                .into_iter()
+                .chain(args.iter().copied())
+                .map(repr_str)
+                .collect();
+            Ok((
+                1,
+                format!(
+                    "Command '[{}]' timed out after 120 seconds",
+                    argv.join(", ")
+                ),
+            ))
+        }
+        CapturedBytes::Failed(err) => Ok((1, spawn_error_text(&err, "git"))),
     }
 }
 
 /// One environment probe line: its output, `exit <code>: <output>`, or `error: <name>`.
-pub fn probe(cmd: &str, cwd: &Path) -> String {
+/// Output that is not UTF-8 is the baseline's uncaught `UnicodeDecodeError`.
+pub fn probe(cmd: &str, cwd: &Path) -> Res<String> {
     let mut command = Command::new("/bin/sh");
     command
         .arg("-c")
         .arg(cmd)
         .current_dir(cwd)
         .stdin(Stdio::null());
-    match capture(command, Duration::from_secs(60)) {
-        Captured::Done {
-            status,
-            stdout,
-            stderr,
-        } => {
-            let both = format!("{stdout}{stderr}");
-            let both = strip(&both);
-            if status.success() {
-                both.to_string()
-            } else {
-                format!("exit {}: {}", exit_code(status), both)
+    Ok(
+        match capture_bytes(command, None, Duration::from_secs(60)) {
+            CapturedBytes::Done {
+                status,
+                stdout,
+                stderr,
+            } => {
+                let both = decode_strict(&stdout)? + &decode_strict(&stderr)?;
+                let both = strip(&both);
+                if status.success() {
+                    both.to_string()
+                } else {
+                    format!("exit {}: {}", exit_code(status), both)
+                }
             }
-        }
-        Captured::Timeout => "error: TimeoutExpired".to_string(),
-        Captured::Failed(err) => format!("error: {}", os_error_name(&err)),
-    }
+            CapturedBytes::Timeout => "error: TimeoutExpired".to_string(),
+            CapturedBytes::Failed(err) => format!("error: {}", os_error_name(&err)),
+        },
+    )
 }
 
 pub struct Executed {

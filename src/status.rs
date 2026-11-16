@@ -52,7 +52,7 @@ pub fn stale_checks(camp: &mut Campaign, gate: &Obj) -> Res<Vec<String>> {
             continue;
         }
         let root = camp.root.clone();
-        let current = Value::Object(camp.input_ids(&root, &list_or_empty(check.get("inputs"))?));
+        let current = Value::Object(camp.input_ids(&root, &list_or_empty(check.get("inputs"))?)?);
         let recorded = if covered {
             dig(dig(receipt.get("covers"), &name), "inputs")
         } else {
@@ -91,7 +91,7 @@ pub fn uncommitted_checks(camp: &mut Campaign, gate: &Obj) -> Res<Vec<String>> {
         }
         let mut args = vec!["status", "--porcelain", "--"];
         args.extend(inputs.iter().map(String::as_str));
-        let (code, out) = git(&camp.root, &args);
+        let (code, out) = git(&camp.root, &args)?;
         if code == 0 && !out.is_empty() {
             found.push(name);
         }
@@ -339,11 +339,11 @@ pub fn briefing_due(camp: &mut Campaign) -> Res<Obj> {
     };
     let mut by_hours = false;
     if let Some(hours @ Value::Number(_)) = briefing.get("every_hours") {
-        let hours = num(hours)?.as_f64();
-        if hours > 0.0 {
+        let hours = num(hours)?;
+        if hours.as_f64() > 0.0 {
             if let Some(anchor) = anchor {
-                let budget = (hours * 3_600_000_000.0).round() as i64;
-                by_hours = now().utc_us - anchor.utc_us >= budget;
+                let budget = crate::time::timedelta_us(hours, 3_600_000_000)?;
+                by_hours = i128::from(now().utc_us - anchor.utc_us) >= budget;
             }
         }
     }

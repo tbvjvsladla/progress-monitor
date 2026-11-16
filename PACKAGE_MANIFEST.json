@@ -31,9 +31,9 @@
     },
     {
       "path": "Cargo.toml",
-      "bytes": 369,
+      "bytes": 392,
       "mode": "0644",
-      "sha256": "1fd3351690b201d29e4824ad8ac5c21e9c9bae3325fef65d5a5cb541100e4aeb"
+      "sha256": "f7dd90b8f4dfcf86e2ef04937c82b04c1f9fd2507ca9abf07cccc1cd84ed08b3"
     },
     {
       "path": "LICENSE",
@@ -43,9 +43,9 @@
     },
     {
       "path": "PORTING.md",
-      "bytes": 31802,
+      "bytes": 35600,
       "mode": "0644",
-      "sha256": "65194b94e54580c232124a95e420a07f40f6fb5afbeaef221cd23e11cc4f5018"
+      "sha256": "f66f51d8496d24661d025dbd2351100fb96893a5daf3c05eac668d792add0234"
     },
     {
       "path": "README.md",
@@ -259,9 +259,9 @@
     },
     {
       "path": "src/bin/pm.rs",
-      "bytes": 570,
+      "bytes": 1115,
       "mode": "0644",
-      "sha256": "6e2b2b171f16dae555e2a8e176854f3e0be0b33e371ee92c7961f634718f9f7c"
+      "sha256": "b73f71c3c2bfee17038aee429e2e9e23c46ecb480d42bbe7086c32ce95ee627e"
     },
     {
       "path": "src/bin/sanitize_check.rs",
@@ -277,9 +277,9 @@
     },
     {
       "path": "src/campaign.rs",
-      "bytes": 27136,
+      "bytes": 27387,
       "mode": "0644",
-      "sha256": "1f399ceba093883c89d9c27384276517273a737f7f5c2d5ea73f6791c7bf40ba"
+      "sha256": "ee52369d40f6be36828e0f3eb2bb86a5a6eeee75c0e8f1c2e065a29ea59a4a14"
     },
     {
       "path": "src/checks.rs",
@@ -289,27 +289,27 @@
     },
     {
       "path": "src/cli.rs",
-      "bytes": 18913,
+      "bytes": 19787,
       "mode": "0644",
-      "sha256": "08a649238b81006d3c58d673aae4f290e6bcf2a0bede60b6bf31477167c03782"
+      "sha256": "dce0cb5058e94d8e2a2e5b992fe4eeb619e7ded6c25137f5e01bf44dbc09f74b"
     },
     {
       "path": "src/commands.rs",
-      "bytes": 61076,
+      "bytes": 61939,
       "mode": "0644",
-      "sha256": "c3cb8b1f168fdff0ee5b62485fcdd14549ca76e6b021116f3bb84af73e5a1933"
+      "sha256": "6495fc6408ab0d1d4d818cd7d159c0e4a34a05b9929a9993bb7f47a2943ad6d3"
     },
     {
       "path": "src/error.rs",
-      "bytes": 1888,
+      "bytes": 2167,
       "mode": "0644",
-      "sha256": "3aeaa0b9b8f3fe20e3be79aa9bfddaa7f61b334d07bc5d52b484de1753ef694b"
+      "sha256": "6bc2d60d1b23c8af8cd68978a75de0f60a425a07ed51d50987c8d6237056347a"
     },
     {
       "path": "src/hook.rs",
-      "bytes": 10943,
+      "bytes": 11399,
       "mode": "0644",
-      "sha256": "720365979a96d74299cccbfb911e7aa5331b499c80115f75a08daea3433b5f54"
+      "sha256": "2601529079c968f99bbc2ab40f2d94e67e4d1d666cb850097f7ff5ec39d602fc"
     },
     {
       "path": "src/init.rs",
@@ -325,9 +325,9 @@
     },
     {
       "path": "src/jsonio.rs",
-      "bytes": 6685,
+      "bytes": 24120,
       "mode": "0644",
-      "sha256": "6213e7fb893dd30cef0b8797c26381fac9535b5deae328315d5e95a98e5a9f82"
+      "sha256": "f70f0ad7152c67c97baac40aed6d37234ce97f671e5ce24ea9dc0f2c8af3d76f"
     },
     {
       "path": "src/lib.rs",
@@ -355,9 +355,9 @@
     },
     {
       "path": "src/lint/mod.rs",
-      "bytes": 8322,
+      "bytes": 8341,
       "mode": "0644",
-      "sha256": "ef18950a5f4bc2b4a3430afa0c44666bb03ec31ab7e7ea2b31d8a806ab4a7d25"
+      "sha256": "e1f4af629466dec3bc518c856392c6be0bb621a2f9a29e6fc0e064db0f4ad969"
     },
     {
       "path": "src/lint/rules.rs",
@@ -367,9 +367,9 @@
     },
     {
       "path": "src/lock.rs",
-      "bytes": 2099,
+      "bytes": 2141,
       "mode": "0644",
-      "sha256": "f51ddc71eb2f037bd73b14a14bcbc67e0a793ba2d624397c5e438bce2d4bac78"
+      "sha256": "8acd3a1dcbddd5eb8617a96d1195c2e547027d77355301a787383c86e42c8599"
     },
     {
       "path": "src/manifest.rs",
@@ -379,21 +379,21 @@
     },
     {
       "path": "src/paths.rs",
-      "bytes": 5832,
+      "bytes": 5822,
       "mode": "0644",
-      "sha256": "aee108a4e0fc4dab4108ff305e6801787dcf92f097a301c353681151e7a2ff43"
+      "sha256": "d7a1c46de990f8241ed6faad352b692bffe20f952a0868d901a1df2318b4eeea"
     },
     {
       "path": "src/proc.rs",
-      "bytes": 8898,
+      "bytes": 12959,
       "mode": "0644",
-      "sha256": "4d653548f46baedfac5db1a05d427eb8ebdb1d439654cb5c49b3d2f37b4d3238"
+      "sha256": "40a49f11f9df63d64f734d3004b4e65b17752a3050965050edf098813196fe03"
     },
     {
       "path": "src/py.rs",
-      "bytes": 14083,
+      "bytes": 20585,
       "mode": "0644",
-      "sha256": "571fb1aa957b05ce16439637c5a34d2388214a6ba310e1baff6ce9efc5b1bb6e"
+      "sha256": "ec130caea92bb4863df57b305cbd46670d4c49e7f5c5c29c94998b283211dcea"
     },
     {
       "path": "src/sanitize.rs",
@@ -403,15 +403,15 @@
     },
     {
       "path": "src/status.rs",
-      "bytes": 20723,
+      "bytes": 20745,
       "mode": "0644",
-      "sha256": "9cc3411c25a458a4ade95863f831b4b76f438dc241cf4af580dd6d865291748f"
+      "sha256": "eeedc17c864156d71c7878fb8755a5a82a3c16760c89cc8068e3ab1b58781347"
     },
     {
       "path": "src/time.rs",
-      "bytes": 9970,
+      "bytes": 18509,
       "mode": "0644",
-      "sha256": "19e5ce14392e9d134fbb801336f490ca3bc165723be71e57596540f6a78e68d3"
+      "sha256": "47b0d8e4d30f677e956a8d162ca1c6243796cd6cda27325e6731257766cddd05"
     },
     {
       "path": "tests/common/mod.rs",

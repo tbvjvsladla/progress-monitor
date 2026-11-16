@@ -190,7 +190,7 @@ impl Campaign {
             .map_or(0, |(_, v)| *v);
         match self.decl.get("budgets") {
             Some(Value::Object(b)) => match b.get(name) {
-                Some(v) if is_int(v) => v.as_i64().unwrap_or(fallback),
+                Some(v) if is_int(v) => crate::py::int_saturating(v).unwrap_or(fallback),
                 _ => fallback,
             },
             _ => fallback,
@@ -368,10 +368,14 @@ impl Campaign {
             let path = self.dir.join("journey.jsonl");
             if path.is_file() {
                 let raw = fs::read(&path).map_err(|e| PmError::os(&e))?;
-                let text = String::from_utf8(raw)
-                    .map_err(|e| PmError::Internal(format!("UnicodeDecodeError: {e}")))?;
+                let text = String::from_utf8(raw).map_err(|e| {
+                    PmError::Internal(format!(
+                        "UnicodeDecodeError: {}",
+                        crate::py::decode_error(&e)
+                    ))
+                })?;
                 for line in splitlines(&text) {
-                    if let Ok(Value::Object(event)) = crate::jsonio::parse(line) {
+                    if let Some(Value::Object(event)) = crate::jsonio::parse_or_skip(line)? {
                         found.push(event);
                     }
                 }
@@ -417,7 +421,9 @@ impl Campaign {
             .create(true)
             .open(&path)
             .map_err(|e| PmError::os(&e))?;
-        writeln!(file, "{}", compact(&Value::Object(event.clone())))
+        let line = compact(&Value::Object(event.clone())) + "\n";
+        crate::jsonio::encodable(&line)?;
+        file.write_all(line.as_bytes())
             .map_err(|e| PmError::os(&e))?;
         events.push(event.clone());
         Ok(event)
@@ -616,7 +622,7 @@ impl Campaign {
     }
 
     // -- fingerprints
-    pub fn input_ids(&mut self, root: &Path, inputs: &[Value]) -> Obj {
+    pub fn input_ids(&mut self, root: &Path, inputs: &[Value]) -> Res<Obj> {
         let mut ids = Obj::new();
         for item in inputs {
             let text = py_str(item);
@@ -625,28 +631,28 @@ impl Campaign {
             let key = (root.display().to_string(), path.clone());
             if !self.ids_cache.contains_key(&key) {
                 let spec = format!("HEAD:./{}", if path == "." { "" } else { path.as_str() });
-                let (code, out) = git(root, &["rev-parse", "--verify", "--quiet", &spec]);
+                let (code, out) = git(root, &["rev-parse", "--verify", "--quiet", &spec])?;
                 let id = (code == 0 && !out.is_empty()).then_some(out);
                 self.ids_cache.insert(key.clone(), id);
             }
             let id = self.ids_cache[&key].clone();
             ids.insert(text, id.map_or(Value::Null, Value::from));
         }
-        ids
+        Ok(ids)
     }
 
-    pub fn probe(&mut self, root: &Path) -> Obj {
+    pub fn probe(&mut self, root: &Path) -> Res<Obj> {
         let key = root.display().to_string();
         if !self.probe_cache.contains_key(&key) {
             let mut outputs = Obj::new();
             let cmds = list_or_empty(self.decl["target"].get("env_probe")).unwrap_or_default();
             for cmd in cmds {
                 let cmd = py_str(&cmd);
-                outputs.insert(cmd.clone(), Value::from(probe(&cmd, root)));
+                outputs.insert(cmd.clone(), Value::from(probe(&cmd, root)?));
             }
             self.probe_cache.insert(key.clone(), outputs);
         }
-        self.probe_cache[&key].clone()
+        Ok(self.probe_cache[&key].clone())
     }
 
     /// Rule 1: whether a result at this input can be reused, and the key.
@@ -655,16 +661,16 @@ impl Campaign {
         let mut why = None;
         if inputs.is_empty() {
             why = Some("no-inputs");
-        } else if git(root, &["rev-parse", "--is-inside-work-tree"]).0 != 0 {
+        } else if git(root, &["rev-parse", "--is-inside-work-tree"])?.0 != 0 {
             why = Some("not-git");
         } else {
             let texts: Vec<String> = inputs.iter().map(py_str).collect();
             let mut args = vec!["status", "--porcelain", "--"];
             args.extend(texts.iter().map(String::as_str));
-            let (code, out) = git(root, &args);
+            let (code, out) = git(root, &args)?;
             if code != 0 || !out.is_empty() {
                 why = Some("uncommitted-input");
-            } else if self.input_ids(root, &inputs).values().any(Value::is_null) {
+            } else if self.input_ids(root, &inputs)?.values().any(Value::is_null) {
                 // not in HEAD: a glob, a missing or ignored path, a folder of another repo
                 why = Some("unresolved-input");
             }
@@ -678,10 +684,10 @@ impl Campaign {
         let ids = if why == Some("not-git") {
             inputs.iter().map(|i| (py_str(i), Value::Null)).collect()
         } else {
-            self.input_ids(root, &inputs)
+            self.input_ids(root, &inputs)?
         };
         let probe = if root.is_dir() {
-            self.probe(root)
+            self.probe(root)?
         } else {
             Obj::new()
         };
@@ -700,7 +706,7 @@ impl Campaign {
             ("host", Value::from(node_name())),
             ("env_probe", Value::Object(probe)),
         ]));
-        let sha = digest(&key);
+        let sha = digest(&key)?;
         Ok(Fingerprint {
             key,
             sha,

@@ -545,11 +545,31 @@ fn parse(argv: &[String]) -> Result<Parsed, ParseEnd> {
     })
 }
 
-/// Print one result as indented JSON.
-fn print_json(result: &Obj) {
+/// Print one result as indented JSON. A text that cannot be encoded (a lone
+/// surrogate) ends like the baseline's uncaught `UnicodeEncodeError`: nothing on
+/// stdout, a traceback on stderr, exit 1. Returns the exit code to use.
+fn print_json(result: &Obj, code: i32) -> i32 {
+    let text = pretty(&Value::Object(result.clone()));
+    if let Err(err) = crate::jsonio::encodable(&text) {
+        return uncaught(&err);
+    }
     let mut out = std::io::stdout().lock();
-    let _ = writeln!(out, "{}", pretty(&Value::Object(result.clone())));
+    let _ = writeln!(out, "{text}");
     let _ = out.flush();
+    code
+}
+
+/// An exception the baseline did not catch: its traceback's last line on stderr, exit 1.
+fn uncaught(err: &PmError) -> i32 {
+    let text = match err {
+        PmError::Usage(text) | PmError::Internal(text) => text.clone(),
+        PmError::Refused(payload) => crate::jsonio::compact(&Value::Object(payload.clone())),
+    };
+    let _ = writeln!(
+        std::io::stderr(),
+        "Traceback (most recent call last):\n{text}"
+    );
+    1
 }
 
 fn failure(text: String) -> Obj {
@@ -581,10 +601,10 @@ pub fn main(argv: &[String]) -> i32 {
     let paths = match Paths::discover() {
         Ok(p) => p,
         Err(text) => {
-            if !is_hook {
-                print_json(&failure(format!("RuntimeError: {text}")));
+            if is_hook {
+                return 0;
             }
-            return if is_hook { 0 } else { 2 };
+            return print_json(&failure(format!("RuntimeError: {text}")), 2);
         }
     };
     let base_path: PathBuf = match &parsed.campaigns {
@@ -600,10 +620,10 @@ pub fn main(argv: &[String]) -> i32 {
     let base = match resolve(&base_path) {
         Ok(b) => b,
         Err(text) => {
-            if !is_hook {
-                print_json(&failure(format!("campaigns directory: {text}")));
+            if is_hook {
+                return 0;
             }
-            return if is_hook { 0 } else { 2 };
+            return print_json(&failure(format!("campaigns directory: {text}")), 2);
         }
     };
     match parsed.leaf.special {
@@ -618,14 +638,15 @@ pub fn main(argv: &[String]) -> i32 {
         }
         Special::Init => {
             let harness = parsed.args.opt("--harness").unwrap_or("both");
+            // the baseline caught only its Usage here; an OS error ended uncaught
             let (result, code) =
                 match crate::init::cmd_init(&base, &paths, harness, parsed.args.flag("--apply")) {
                     Ok(r) => (r, 0),
-                    Err(e) => (error_payload(e).0, 2),
+                    Err(PmError::Usage(text)) => (failure(text), 2),
+                    Err(e) => return uncaught(&e),
                 };
             let shown: Obj = result.into_iter().filter(|(_, v)| !v.is_null()).collect();
-            print_json(&shown);
-            return code;
+            return print_json(&shown, code);
         }
         Special::None => {}
     }
@@ -640,8 +661,7 @@ pub fn main(argv: &[String]) -> i32 {
         .into_iter()
         .filter(|(k, v)| !v.is_null() || k == "hitl" || k == "note")
         .collect();
-    print_json(&shown);
-    code
+    print_json(&shown, code)
 }
 
 fn error_payload(err: PmError) -> (Obj, i32) {

@@ -51,7 +51,7 @@ pub fn state_digest(camp: &mut Campaign) -> Res<String> {
         ("executed", Value::from(executed)),
         ("reviews", Value::from(reviews)),
     ]));
-    Ok(digest(&view))
+    digest(&view)
 }
 
 fn directive(pm: &str, item: &Obj, count: i64, retries: i64) -> Res<(&'static str, String)> {
@@ -129,13 +129,16 @@ pub fn hook_decision(camp: &mut Campaign, payload: &Obj) -> Res<Option<Decision>
     if items.is_empty() {
         return Ok(None); // rule 3
     }
-    let budget_us = camp.budget("phase_minutes") * 60 * 1_000_000;
+    let budget_us = crate::time::timedelta_us(
+        crate::py::Num::Int(i128::from(camp.budget("phase_minutes"))),
+        60 * 1_000_000,
+    )?;
     let overdue = items.iter().find(|i| {
         eq_str(i.get("kind"), "phase-running")
             && i.get("started")
                 .and_then(Value::as_str)
                 .and_then(parse_time)
-                .is_some_and(|s| now().utc_us - s.utc_us > budget_us)
+                .is_some_and(|s| i128::from(now().utc_us - s.utc_us) > budget_us)
     });
     if opt_truthy(payload.get("background_tasks")) && overdue.is_none() {
         return Ok(None); // rule 4
@@ -247,12 +250,13 @@ fn run_hook(
     std::io::stdin()
         .read_to_end(&mut raw)
         .map_err(|e| format!("OSError: {e}"))?;
-    let raw = String::from_utf8(raw).map_err(|e| format!("UnicodeDecodeError: {e}"))?;
+    let raw = String::from_utf8(raw)
+        .map_err(|e| format!("UnicodeDecodeError: {}", crate::py::decode_error(&e)))?;
     let payload = if strip(&raw).is_empty() {
         Obj::new()
     } else {
-        match crate::jsonio::parse(&raw) {
-            Ok(Value::Object(m)) => m,
+        match crate::jsonio::parse_or_skip(&raw).map_err(|e| describe(&e))? {
+            Some(Value::Object(m)) => m,
             _ => Obj::new(),
         }
     };
@@ -290,6 +294,14 @@ pub fn stop_hook(base: &Path, harness: &str, executor: &str, paths: &Paths) {
     let message = match result {
         Ok(Ok(None)) => return,
         Ok(Ok(Some(line))) => {
+            if let Err(e) = crate::jsonio::encodable(&line) {
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "[{TOOL}] stop-hook error, not blocking: {}",
+                    describe(&e)
+                );
+                return;
+            }
             let mut stdout = std::io::stdout().lock();
             match writeln!(stdout, "{line}").and_then(|()| stdout.flush()) {
                 Ok(()) => return,

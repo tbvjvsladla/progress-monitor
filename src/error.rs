@@ -57,3 +57,14 @@ pub fn os_error_name(err: &std::io::Error) -> &'static str {
         _ => "OSError",
     }
 }
+
+#[cfg(test)]
+impl PmError {
+    /// The message text, for assertions.
+    pub fn to_string_for_test(&self) -> String {
+        match self {
+            PmError::Usage(t) | PmError::Internal(t) => t.clone(),
+            PmError::Refused(p) => format!("{p:?}"),
+        }
+    }
+}

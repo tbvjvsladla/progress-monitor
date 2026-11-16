@@ -18,7 +18,7 @@ pub fn truthy(value: &Value) -> bool {
     match value {
         Value::Null => false,
         Value::Bool(b) => *b,
-        Value::Number(n) => n.as_f64().is_some_and(|x| x != 0.0),
+        Value::Number(n) => number_f64(n) != 0.0,
         Value::String(s) => !s.is_empty(),
         Value::Array(a) => !a.is_empty(),
         Value::Object(o) => !o.is_empty(),
@@ -40,15 +40,13 @@ impl Num {
     pub fn of(value: &Value) -> Option<Num> {
         match value {
             Value::Bool(b) => Some(Num::Int(i128::from(*b))),
-            Value::Number(n) => {
-                if let Some(i) = n.as_i64() {
-                    Some(Num::Int(i128::from(i)))
-                } else if let Some(u) = n.as_u64() {
-                    Some(Num::Int(i128::from(u)))
-                } else {
-                    n.as_f64().map(Num::Float)
-                }
-            }
+            Value::Number(n) => match int_text(n) {
+                Some(text) => Some(text.parse().map_or_else(
+                    |_| Num::Float(number_f64(n)), // beyond i128: compared as a float
+                    Num::Int,
+                )),
+                None => Some(Num::Float(number_f64(n))),
+            },
             _ => None,
         }
     }
@@ -76,16 +74,8 @@ impl Num {
 
     pub fn to_value(self) -> Value {
         match self {
-            Num::Int(i) => {
-                if let Ok(v) = i64::try_from(i) {
-                    Value::from(v)
-                } else if let Ok(v) = u64::try_from(i) {
-                    Value::from(v)
-                } else {
-                    Value::from(i as f64)
-                }
-            }
-            Num::Float(f) => Number::from_f64(f).map_or(Value::Null, Value::Number),
+            Num::Int(i) => Value::Number(Number::from_string_unchecked(i.to_string())),
+            Num::Float(f) => float_value(f),
         }
     }
 }
@@ -94,7 +84,7 @@ fn type_name(value: &Value) -> &'static str {
     match value {
         Value::Null => "NoneType",
         Value::Bool(_) => "bool",
-        Value::Number(n) if n.is_f64() => "float",
+        Value::Number(n) if int_text(n).is_none() => "float",
         Value::Number(_) => "int",
         Value::String(_) => "str",
         Value::Array(_) => "list",
@@ -130,7 +120,7 @@ pub fn ge_int(a: &Value, b: i64) -> Res<bool> {
 
 /// An int that is not a bool.
 pub fn is_int(value: &Value) -> bool {
-    matches!(value, Value::Number(n) if !n.is_f64())
+    matches!(value, Value::Number(n) if int_text(n).is_some())
 }
 
 /// Loose equality: 1 == 1.0 == true, dicts compare without order.
@@ -214,6 +204,10 @@ pub fn repr_str(text: &str) -> String {
             c if (c as u32) < 0x20 || c as u32 == 0x7f => {
                 out.push_str(&format!("\\x{:02x}", c as u32));
             }
+            c if crate::jsonio::as_surrogate(c).is_some() => {
+                let code = crate::jsonio::as_surrogate(c).unwrap_or(0);
+                out.push_str(&format!("\\u{code:04x}"));
+            }
             c => out.push(c),
         }
     }
@@ -221,14 +215,61 @@ pub fn repr_str(text: &str) -> String {
     out
 }
 
+/// The text of an int number (`-?digits`); None for a float.
+pub fn int_text(n: &Number) -> Option<&str> {
+    let text = n.as_str();
+    let digits = text.strip_prefix('-').unwrap_or(text);
+    (!digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())).then_some(text)
+}
+
+/// The value of a number as a float (`NaN` and the infinities included).
+pub fn number_f64(n: &Number) -> f64 {
+    n.as_str().parse().unwrap_or(f64::NAN)
+}
+
+/// A float number held as its `repr` text, `NaN` and `Infinity` included.
+pub fn float_value(x: f64) -> Value {
+    Value::Number(Number::from_string_unchecked(float_repr(x)))
+}
+
 /// Text of a JSON number as the baseline printed it.
 pub fn number_text(n: &Number) -> String {
-    if let Some(i) = n.as_i64() {
-        i.to_string()
-    } else if let Some(u) = n.as_u64() {
-        u.to_string()
+    match int_text(n) {
+        Some(text) => text.to_string(),
+        None => float_repr(number_f64(n)),
+    }
+}
+
+/// The message of a UTF-8 `UnicodeDecodeError` for these bytes.
+pub fn decode_error(err: &std::string::FromUtf8Error) -> String {
+    utf8_error_text(err.as_bytes(), err.utf8_error())
+}
+
+/// [`decode_error`] from the bytes and the error.
+pub fn utf8_error_text(bytes: &[u8], err: std::str::Utf8Error) -> String {
+    let at = err.valid_up_to();
+    let lead = bytes[at];
+    let (len, reason) = match err.error_len() {
+        Some(n) => {
+            let start_ok = matches!(lead, 0xC2..=0xF4);
+            (
+                n,
+                if start_ok {
+                    "invalid continuation byte"
+                } else {
+                    "invalid start byte"
+                },
+            )
+        }
+        None => (bytes.len() - at, "unexpected end of data"),
+    };
+    if len == 1 {
+        format!("'utf-8' codec can't decode byte 0x{lead:02x} in position {at}: {reason}")
     } else {
-        float_repr(n.as_f64().unwrap_or(0.0))
+        format!(
+            "'utf-8' codec can't decode bytes in position {at}-{}: {reason}",
+            at + len - 1
+        )
     }
 }
 
@@ -462,5 +503,141 @@ mod tests {
         assert_eq!(repr_str("a"), "'a'");
         assert_eq!(g_format(30.0), "30");
         assert_eq!(g_format(0.5), "0.5");
+    }
+}
+
+/// An int number as i64, saturated at the ends (the baseline's ints had no bound).
+pub fn int_saturating(value: &Value) -> Option<i64> {
+    let Value::Number(n) = value else {
+        return None;
+    };
+    let text = int_text(n)?;
+    Some(match text.parse::<i128>() {
+        Ok(i) => i.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64,
+        Err(_) if text.starts_with('-') => i64::MIN,
+        Err(_) => i64::MAX,
+    })
+}
+
+/// First code points of the Unicode decimal digit runs (`0` of each run of ten),
+/// from the Unicode 15.0 database of the baseline interpreter (3.12).
+const DECIMAL_ZEROS: [u32; 68] = [
+    0x30, 0x660, 0x6f0, 0x7c0, 0x966, 0x9e6, 0xa66, 0xae6, 0xb66, 0xbe6, 0xc66, 0xce6, 0xd66,
+    0xde6, 0xe50, 0xed0, 0xf20, 0x1040, 0x1090, 0x17e0, 0x1810, 0x1946, 0x19d0, 0x1a80, 0x1a90,
+    0x1b50, 0x1bb0, 0x1c40, 0x1c50, 0xa620, 0xa8d0, 0xa900, 0xa9d0, 0xa9f0, 0xaa50, 0xabf0, 0xff10,
+    0x104a0, 0x10d30, 0x11066, 0x110f0, 0x11136, 0x111d0, 0x112f0, 0x11450, 0x114d0, 0x11650,
+    0x116c0, 0x11730, 0x118e0, 0x11950, 0x11c50, 0x11d50, 0x11da0, 0x11f50, 0x16a60, 0x16ac0,
+    0x16b50, 0x1d7ce, 0x1d7d8, 0x1d7e2, 0x1d7ec, 0x1d7f6, 0x1e140, 0x1e2f0, 0x1e4f0, 0x1e950,
+    0x1fbf0,
+];
+
+fn decimal_value(ch: char) -> Option<u32> {
+    let c = ch as u32;
+    DECIMAL_ZEROS
+        .iter()
+        .find(|zero| (**zero..**zero + 10).contains(&c))
+        .map(|zero| c - zero)
+}
+
+/// `float(text)` for a str: Unicode digits and spaces, underscores between digits,
+/// `inf`/`infinity`/`nan` in any case. None where the baseline raised ValueError.
+pub fn py_float(text: &str) -> Option<f64> {
+    // _PyUnicode_TransformDecimalAndSpaceToASCII
+    let ascii: String = text
+        .chars()
+        .map(|ch| {
+            if is_space(ch) {
+                ' '
+            } else if let Some(d) = decimal_value(ch) {
+                char::from_digit(d, 10).unwrap_or('?')
+            } else if (ch as u32) > 127 {
+                '?'
+            } else {
+                ch
+            }
+        })
+        .collect();
+    let body =
+        ascii.trim_matches(|c: char| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r'));
+    let body = if body.contains('_') {
+        let mut out = String::with_capacity(body.len());
+        let mut prev = '\0';
+        for ch in body.chars() {
+            if ch == '_' {
+                if !prev.is_ascii_digit() {
+                    return None;
+                }
+            } else {
+                if prev == '_' && !ch.is_ascii_digit() {
+                    return None;
+                }
+                out.push(ch);
+            }
+            prev = ch;
+        }
+        if prev == '_' {
+            return None;
+        }
+        out
+    } else {
+        body.to_string()
+    };
+    let unsigned = body.strip_prefix(['+', '-']).unwrap_or(&body);
+    let word = unsigned.to_ascii_lowercase();
+    if matches!(word.as_str(), "inf" | "infinity" | "nan") {
+        return body.parse().ok();
+    }
+    // digits with at most one point and an optional exponent; no other spelling
+    let (mantissa, exponent) = match unsigned.find(['e', 'E']) {
+        Some(at) => (&unsigned[..at], Some(&unsigned[at + 1..])),
+        None => (unsigned, None),
+    };
+    let point_ok = mantissa.matches('.').count() <= 1
+        && mantissa.chars().all(|c| c.is_ascii_digit() || c == '.')
+        && mantissa.chars().any(|c| c.is_ascii_digit());
+    let exp_ok = exponent.is_none_or(|e| {
+        let e = e.strip_prefix(['+', '-']).unwrap_or(e);
+        !e.is_empty() && e.chars().all(|c| c.is_ascii_digit())
+    });
+    if !(point_ok && exp_ok) {
+        return None;
+    }
+    body.parse().ok()
+}
+
+#[cfg(test)]
+mod float_tests {
+    use super::*;
+
+    #[test]
+    fn float_of_text_as_baseline() {
+        assert_eq!(py_float("1_0"), Some(10.0));
+        assert_eq!(py_float(" 1 \n"), Some(1.0));
+        assert_eq!(py_float("-INF"), Some(f64::NEG_INFINITY));
+        assert!(py_float("nan").is_some_and(f64::is_nan));
+        assert_eq!(py_float("Infinity"), Some(f64::INFINITY));
+        assert_eq!(py_float("+5"), Some(5.0));
+        assert_eq!(py_float("\u{0661}\u{0662}"), Some(12.0));
+        assert_eq!(py_float("1_0.5_5e1_0"), Some(10.55e10));
+        for bad in [
+            "0x1", "1__0", "_1", "1_", "", "1e", ".", "1.2.3", "inf_", "é",
+        ] {
+            assert_eq!(py_float(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn numbers_keep_baseline_text() {
+        let v = crate::jsonio::parse(
+            "[1e400, -0, -0.0, 1E5, 100000000000000000000, NaN, -Infinity, -943305.0469559873]",
+        )
+        .unwrap();
+        assert_eq!(
+            crate::jsonio::compact(&v),
+            "[Infinity, 0, -0.0, 100000.0, 100000000000000000000, NaN, -Infinity, -943305.0469559873]"
+        );
+        assert!(is_int(&v[4]) && !is_int(&v[5]));
+        assert_eq!(int_saturating(&v[4]), Some(i64::MAX));
+        assert!(truthy(&v[5]) && !truthy(&v[1]) && !truthy(&v[2]));
     }
 }

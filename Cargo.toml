@@ -11,6 +11,6 @@ name = "progress_monitor"
 path = "src/lib.rs"
 
 [dependencies]
-serde_json = { version = "1", features = ["preserve_order"] }
+serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
 sha2 = "0.10"
 libc = "0.2"

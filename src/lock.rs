@@ -23,13 +23,14 @@ impl Drop for LockGuard {
     }
 }
 
-/// Seconds to wait: the argument, else `PM_LOCK_WAIT_S` (default 30).
+/// Seconds to wait: the argument, else `PM_LOCK_WAIT_S` (default 30) read as
+/// the baseline's `float()` reads a string.
 pub fn wait_seconds(wait: Option<f64>) -> Res<f64> {
     if let Some(w) = wait {
         return Ok(w);
     }
     let text = std::env::var("PM_LOCK_WAIT_S").unwrap_or_else(|_| "30".to_string());
-    crate::py::strip(&text).parse::<f64>().map_err(|_| {
+    crate::py::py_float(&text).ok_or_else(|| {
         PmError::Internal(format!(
             "ValueError: could not convert string to float: {}",
             crate::py::repr_str(&text)
