@@ -45,7 +45,7 @@ prepare 계획(`commands/` 하위 폴더, `consts.rs`, `gates.rs`)보다 파일 
 
 ### 회차 1 검토 지적의 해소 (attempt 2)
 
-- r1-K1·K2 JSON 완전 보존: `jsonio::parse`가 `json.loads`를 직접 이식한다. 숫자는 serde_json `arbitrary_precision`으로 출력 문구를 그대로 들고 다닌다. 정수는 모든 자리(4300자리 초과는 기준선의 `ValueError`), `-0`은 `0`, float는 올바른 반올림으로 읽어 Python `repr`로 쓴다(`-943305.0469559873` 왕복, `1e400` → `Infinity`). `NaN`·`Infinity`·`-Infinity`를 읽고 쓴다. 고립 서로게이트 `\udxxx`는 표지 U+10FFFF와 대리 문자(U+10F000–U+10F7FF) 두 글자로 보존하고(회차 2에서 표현을 바꿈, 아래 절), 파일·stdout·journey·해시로 내보낼 때 기준선과 같은 `UnicodeEncodeError`(위치 포함)가 된다. `write_json`은 이때 빈 `.tmp`를 남기고, 일반 명령의 stdout 출력이면 stdout은 비고 exit 1이다. `--briefing-every-hours inf`는 `Infinity`로 저장되고, 그 뒤 `briefing_due`는 기준선처럼 `OverflowError`가 된다. 중첩 9997단 초과는 `RecursionError`. 오류 문구도 `JSONDecodeError`와 같다(자동 대조 11240건 일치).
+- r1-K1·K2 JSON 완전 보존: `jsonio::parse`가 `json.loads`를 직접 이식한다. 숫자는 serde_json `arbitrary_precision`으로 출력 문구를 그대로 들고 다닌다. 정수는 모든 자리(4300자리 초과는 기준선의 `ValueError`), `-0`은 `0`, float는 올바른 반올림으로 읽어 Python `repr`로 쓴다(`-943305.0469559873` 왕복, `1e400` → `Infinity`). `NaN`·`Infinity`·`-Infinity`를 읽고 쓴다. 고립 서로게이트 `\udxxx`는 표지 U+10FFFF와 대리 문자(U+10F000–U+10F7FF) 두 글자로 보존하고(회차 2에서 표현을 바꿈, 아래 절), 파일·stdout·journey·해시로 내보낼 때 기준선과 같은 `UnicodeEncodeError`(위치 포함)가 된다. `write_json`은 이때 빈 `.tmp`를 남기고, 일반 명령의 stdout 출력이면 stdout은 비고 exit 1이다. `--briefing-every-hours inf`는 `Infinity`로 저장되고, 그 뒤 `briefing_due`는 기준선처럼 `OverflowError`가 된다. 중첩 9997단 초과는 `RecursionError`. 오류 문구도 `JSONDecodeError`와 같다(자동 대조 13373건 일치, `evidence/json_cases.jsonl`).
 - r1-K3: `proc::capture_bytes`의 시간 제한이 자식 종료와 두 파이프 EOF를 함께 덮는다(`communicate(timeout)`). 초과면 자식만 죽이고 거둔다. git 시간 초과 문구는 `Command '[...]' timed out after 120 seconds`, 실행 실패는 `[Errno N] ...: 'git'`.
 - r1-K4: `env_probe`와 `git` 출력은 엄격한 UTF-8(stdout 먼저, stderr도)로 푼다. 실패는 기준선과 같은 `UnicodeDecodeError: 'utf-8' codec can't decode ...` 문구로 `ok:false`, exit 2.
 - r1-K5: `init`에서 `Usage` 밖의 오류(OS 오류)는 stdout 없이 stderr의 traceback 끝줄과 exit 1.
@@ -53,7 +53,7 @@ prepare 계획(`commands/` 하위 폴더, `consts.rs`, `gates.rs`)보다 파일 
 - r1-K7: `parse_time`이 CPython 3.12 C 구현을 그대로 따른다(ISO 주 날짜, `05.+00:00`, 오프셋 앞 공백, 오프셋 소수 초와 `+00:00:00.5` → UTC, `YYYY-Www-HH` 모호성, 아무 구분자 1글자).
 - r1-K10: `PM_LOCK_WAIT_S`와 `--briefing-every-hours`를 `py::py_float`(Python `float(str)`: 유니코드 숫자·공백, 숫자 사이 밑줄, `inf`/`infinity`/`nan` 대소문자)로 읽는다.
 - r1-B2: `Paths::exe` 주석을 실행 파일 경로로 고쳤다.
-- 정수 예산·`round_cap`·`review_round`는 i64 범위 밖 정수도 받는다(i64로 포화). 깊은 JSON을 재귀로 다루므로 `pm`은 명령을 512 MiB 스택 스레드에서 돌린다(가상 예약만 한다).
+- 정수 예산·`round_cap`·`review_round`는 i64 범위 밖 정수도 받는다(회차 3에서 i64 포화를 없앴다, 아래 절). 깊은 JSON을 재귀로 다루므로 `pm`은 명령을 512 MiB 스택 스레드에서 돌린다(가상 예약만 한다).
 
 ### 회차 2: 사설 영역 문자와 고립 서로게이트의 구분 (attempt 3)
 
@@ -65,6 +65,22 @@ prepare 계획(`commands/` 하위 폴더, `consts.rs`, `gates.rs`)보다 파일 
 - 순서: `sort_keys`(정렬된 compact, 해시 입력)와 `py_order`가 원소의 코드 포인트로 비교한다(서로게이트 U+D800..U+DFFF < U+E000 < 실제 U+10F000).
 - 같이 고친 것: `py::repr_str`가 `str.isprintable`이 거부하는 문자(Cc·Cf·Cs·Co·Cn·Zl·Zp·공백 외 Zs, Unicode 15.0.0)를 `\xhh`/`\uhhhh`/`\Uhhhhhhhh`로 쓴다(`src/printable.rs`, 기준선 인터프리터의 `unicodedata`에서 만든 712개 범위). `metrics`의 `check_seconds`는 영수증이 없으면 정수 `0`이다(기준선 `round(sum(()), 3)`).
 - 회귀 시험: `jsonio::tests::real_plane_16_characters_beside_lone_surrogates`(실제 U+10F000·U+10F7FF·U+10FFFF가 글자와 이스케이프로 같고, 서로게이트와 섞인 글의 원소·인코딩 오류 위치·`sort_keys` 순서), `printable::tests::printable_as_baseline`, `py` 시험의 `repr_str` 사례.
+
+### 회차 3: 숫자·시간 처리 전체 점검 (attempt 4)
+
+회차 2 차단 지적 r2-1·r2-2·r2-4·r2-5·r2-6·r2-7·r2-8(`temp/pm-rust-261116/review/c10-r2.json`)을 고치면서 숫자를 받는 곳을 모두 다시 봤다. 원인은 큰 정수·NaN·Infinity를 받게 된 뒤 사용처마다 범위와 특수값 처리가 어긋난 것이다.
+
+- 정수 산술(r2-5, r2-7): `Num::plus`는 검사 연산이다. 합이 i128 밖이면 float로 넘긴다(의도한 변경 8의 3). `py::int_saturating`(i64 포화)은 없앴다. `Campaign::budget`·`allows`는 `Num`을 돌려주고, 상한 비교(`exec_retries`+1+허용, `forced_reruns_*`, `auto_cells`, `explore_*`, `stall_*`, `stop_block_cap`)는 모두 `Num`으로 한다.
+- 비교: `Num::compare`는 int와 float를 정확히 비교한다(`9007199254740993 > 9007199254740992.0`). NaN이 끼면 `ge`·`gt`가 거짓이다(기준선의 `>=`·`>`). 그래서 `retries`가 NaN이면 `phase retry`를 거절하지 않는다. 이전의 `num_cmp(..).unwrap_or(Equal)`는 NaN을 같음으로 봤다.
+- `review_round`: 기준선처럼 `max([int(review_base or 0)] + int·bool 회차)`의 값 자체를 돌려준다(첫 최대값, `round` 없는 review 이벤트는 0). `int()`는 `py::py_int`(float 절삭, NaN·무한대 오류, 문자열은 Unicode 숫자·공백·`_`·부호와 4300자리 한도, 오류 문구는 기준선). `cell add`의 `review_base`는 그 값이 참일 때 그대로 쓴다. `round_cap`은 bool이 아닌 int이고 `>= 1`인지 `Num`으로 본다.
+- `max`·`sorted`: 영수증 번호는 `py::py_max`(기준선 `max([n ...] + [0]) + 1`, `0.0`·NaN 순서 그대로), 영수증 정렬은 `py::py_sort`(64개 미만은 기준선 `list.sort`의 run 탐지와 이진 삽입을 그대로 따라 NaN이 있어도 같은 순서).
+- 시간 제한·마감(r2-1, r2-2): `proc::deadline_after`가 기준선 `monotonic() + t`의 행동을 따른다. NaN·무한대·`Instant`를 넘는 값은 마감 없음, 0 이하는 즉시(먼저 한 번 확인한 뒤). 검사 실행(`timeout_s`, `check_timeout_s`)과 잠금(`PM_LOCK_WAIT_S`)이 같이 쓴다. `phase_minutes`·`briefing.every_hours`는 기존 `time::timedelta_us`(기준선 `timedelta` 오류 포함)로 받고, 그 오류 문구를 `OverflowError: Python int too large to convert to C int`로 바로잡았다.
+- float 출력(r2-6): `Value::from(f64)`를 쓰지 않는다(비유한 값이 `null`이 된다). `metrics`의 `seconds`·비율·`check_seconds`, gate·final 이벤트와 영수증의 `seconds`는 `py::float_value`로 쓴다(`Infinity`·`NaN` 포함). `metrics`의 `float()`는 1e308을 넘는 int에서 `OverflowError: int too large to convert to float`, 목록·객체에서 기준선 `TypeError` 문구다.
+- `float(str)`(r2-8): 127 미만 문자는 그대로 두고(그래서 `\x1c`–`\x1f`는 공백이 아니다) 앞뒤의 ASCII 공백만 벗긴다. 127 이상은 공백이면 `' '`, 십진 숫자면 숫자, 그 밖은 실패다(`--briefing-every-hours`, `PM_LOCK_WAIT_S`, `metrics`의 문자열 `seconds`).
+- `{:g}`(잠금 실패 문구): `py::g_format`이 유효숫자 6자리·지수 규칙(`-1e+20`, `-1.23457e+06`, `1e-07`, `nan`, `inf`)을 따른다. `repr`/`str`의 비유한 float는 `nan`·`inf`·`-inf`다(`py::float_str`, 로그 이름 같은 `str()` 자리).
+- `src/bin/pm.rs`(r2-4): 큰 스택 스레드를 만들지 못하면(예: `ulimit -v 400000`) 현재 스레드에서 그대로 실행한다. `pm --help`가 exit 0으로 도움말을 낸다.
+- 의도한 변경 8의 3이 닿는 모습: i128 밖으로 나가는 int 결과(`2**127-1`의 `attempt`에 `+1`, `int(1e300)`인 `review_base`의 다음 회차, `2**127`인 영수증 번호의 다음 번호)는 float 값과 문구(`1.7014118346046923e+38`, `1e+300`)다. i128 밖 정수끼리의 비교도 float여서 `2**127`과 `2**127+1`이 같다고 본다. 아래 대조에서 이런 사례 18건을 따로 셌다.
+- 회귀 시험: `py::float_tests::number_edges_as_baseline`, `py::float_tests::sort_follows_the_baseline_with_nan`.
 
 ### 의도한 변경 8 (사용자 수용, 2026-11-16)
 
@@ -87,7 +103,7 @@ prepare 계획(`commands/` 하위 폴더, `consts.rs`, `gates.rs`)보다 파일 
 |---|---|---|
 | `cargo build --locked`, `cargo build --release --locked` | PASS | 0 |
 | `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings` (자기 확인) | PASS | 0 |
-| `cargo test --locked --no-fail-fast` (전체 90건, 단위 28건 포함) | PASS | 0 |
+| `cargo test --locked --no-fail-fast` (전체 92건, 단위 30건 포함) | PASS | 0 |
 | 오라클 `PM_BIN=target/release/pm PM_LINT_BIN=target/release/check_campaign` | PASS (Ran 50, OK) | 0 |
 | `keycmp.sh` | PASS (KEYCMP-OK) | 0 |
 | `package_manifest --check` (MANIFEST 재생성 후) | PASS (76 files) | 0 |
@@ -99,9 +115,11 @@ prepare 계획(`commands/` 하위 폴더, `consts.rs`, `gates.rs`)보다 파일 
 | 회차 2: 위 13373건·30526건 재대조(표현 변경 뒤) | PASS (불일치 0) | 0 |
 | 회차 2: `repr` 1112068자(모든 비서로게이트 코드 포인트)와 따옴표 사례를 기준선 `repr`과 비교 | PASS (같음) | 0 |
 | 회차 2: 혼합 문자 시나리오 13단계(open, event 3건, cell add 2건, phase start/close, hitl open, status, metrics, brief, stop-hook)를 기준선과 나란히 실행, check_campaign 포함 | PASS (stdout·exit·인스턴스 파일이 시각·경로 외 같음) | 0 |
+| 회차 3: 숫자 대조 `evidence/r3/numdiff.py` — 숫자 필드 31곳(예산 11개, 단계 `attempt`·`retries`, `review_base`·`round_cap`·review 이벤트 `round`, 검사 `timeout_s`, 영수증 `n`·`seconds`, journey `seconds`, monitor `unchanged`·`blocks`·`total_blocks`·`refused_since`·`stalls`, `briefing.every_hours`, `--briefing-every-hours`, `PM_LOCK_WAIT_S`(잠금을 잡은 채 포함))에 값 19개(0, -0, 2^63-1, 2^63, 2^127-1, 2^127, -2^127-1, ±1e20, ±1e300, NaN, ±Infinity, ±1.5, -5, true, 2)와 문자열 23개, 추가 값 6개(±1e308, 최대 float, 5e-324, 0.5, -0.0)를 넣어 기준선과 나란히 실행(단계마다 exit·stdout, 끝의 인스턴스 파일 전부) | PASS (721건, 불일치 0. 의도한 변경 8의 3 사례 21건은 따로 셈) | 0 |
+| 회차 3: 위 변경 뒤 오라클·`keycmp.sh`·`cargo test`·fmt·clippy 재실행 | PASS | 0 |
 | 묶음 검사(gate) | NOT_RUN (gate의 몫) | - |
 
-판정: **COMPLETE** — `scripts/pm.py`의 모든 명령을 이식했고 회차 1 차단 지적과 회차 2의 표현 충돌을 고쳤다. 남은 차이는 사용자가 받은 의도한 변경 8에 옮겨 적었고, 그 밖의 알려진 차이는 없다. 묶음 검사는 gate가 판정한다.
+판정: **COMPLETE** — `scripts/pm.py`의 모든 명령을 이식했고 회차 1 차단 지적, 회차 2의 표현 충돌, 회차 2 검토의 숫자·시간 지적을 고쳤다. 남은 차이는 사용자가 받은 의도한 변경 8에 옮겨 적었고, 그 밖의 알려진 차이는 없다. 묶음 검사는 gate가 판정한다.
 
 ## c11-lint — `scripts/check_campaign.py` → `src/lint/` + `src/bin/check_campaign.rs`
 

@@ -83,6 +83,22 @@ fn read_all(
     })
 }
 
+/// The moment `seconds` from now, as the baseline's `monotonic() + seconds`
+/// limit behaved: none for NaN, for infinity and past what an `Instant` holds
+/// (the limit is never reached), now for zero and below.
+pub fn deadline_after(seconds: f64) -> Option<Instant> {
+    let start = Instant::now();
+    if seconds.is_nan() {
+        return None;
+    }
+    if seconds <= 0.0 {
+        return Some(start);
+    }
+    Duration::try_from_secs_f64(seconds)
+        .ok()
+        .and_then(|d| start.checked_add(d))
+}
+
 fn wait_until(child: &mut Child, deadline: Option<Instant>) -> std::io::Result<Option<ExitStatus>> {
     let mut pause = Duration::from_millis(1);
     loop {
@@ -351,10 +367,7 @@ pub fn execute(
     let log = File::create(log_path)?;
     match spawn_in_session(cmd, cwd, &log) {
         Ok(mut child) => {
-            let deadline = Duration::try_from_secs_f64(timeout_s.max(0.0))
-                .ok()
-                .map(|d| Instant::now() + d);
-            match wait_until(&mut child, deadline)? {
+            match wait_until(&mut child, deadline_after(timeout_s))? {
                 Some(status) => code = Some(exit_code(status)),
                 None => {
                     // SAFETY: the child leads its own process group (setsid); kill only signals it.

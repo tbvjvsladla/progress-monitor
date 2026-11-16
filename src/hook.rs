@@ -9,7 +9,9 @@ use crate::campaign::Campaign;
 use crate::error::{PmError, Res};
 use crate::jsonio::{compact, digest};
 use crate::paths::Paths;
-use crate::py::{eq_str, ge_int, need, num, obj, opt_truthy, plus_one, py_eq, py_str, strip, Obj};
+use crate::py::{
+    eq_str, ge_num, need, num, obj, opt_truthy, plus_one, py_eq, py_str, strip, Num, Obj,
+};
 use crate::status::{actionable, briefing_due};
 use crate::time::{now, parse_time, stamp_now};
 use crate::{FINAL, TOOL};
@@ -54,12 +56,12 @@ pub fn state_digest(camp: &mut Campaign) -> Res<String> {
     digest(&view)
 }
 
-fn directive(pm: &str, item: &Obj, count: i64, retries: i64) -> Res<(&'static str, String)> {
+fn directive(pm: &str, item: &Obj, count: Num, retries: Num) -> Res<(&'static str, String)> {
     let kind = py_str(need(item, "kind")?);
     let spent =
-        kind == "phase-running" && ge_int(item.get("retries").unwrap_or(&Value::from(0)), retries)?;
+        kind == "phase-running" && ge_num(item.get("retries").unwrap_or(&Value::from(0)), retries)?;
     let text = |k: &str| item.get(k).map_or("None".to_string(), py_str);
-    if count <= retries && !spent {
+    if retries.ge(count) && !spent {
         if kind == "phase-running" {
             return Ok((
                 "retry",
@@ -129,10 +131,7 @@ pub fn hook_decision(camp: &mut Campaign, payload: &Obj) -> Res<Option<Decision>
     if items.is_empty() {
         return Ok(None); // rule 3
     }
-    let budget_us = crate::time::timedelta_us(
-        crate::py::Num::Int(i128::from(camp.budget("phase_minutes"))),
-        60 * 1_000_000,
-    )?;
+    let budget_us = crate::time::timedelta_us(camp.budget("phase_minutes"), 60 * 1_000_000)?;
     let overdue = items.iter().find(|i| {
         eq_str(i.get("kind"), "phase-running")
             && i.get("started")
@@ -153,15 +152,13 @@ pub fn hook_decision(camp: &mut Campaign, payload: &Obj) -> Res<Option<Decision>
     } else {
         inc(&mut monitor, "unchanged")?;
     }
-    let refused = num(&monitor["refused_since"])?.compare(crate::py::Num::Int(0))
-        == Some(std::cmp::Ordering::Greater)
-        && !changed;
+    let refused = num(&monitor["refused_since"])?.gt(Num::Int(0)) && !changed;
     monitor.insert("refused_since".into(), Value::from(0));
     if crate::py::truthy(&monitor["released"]) {
         camp.save_monitor(&monitor)?;
         return Ok(None); // rule 5
     }
-    if ge_int(&monitor["blocks"], camp.budget("stop_block_cap"))? {
+    if ge_num(&monitor["blocks"], camp.budget("stop_block_cap"))? {
         camp.emit(
             "monitor-release",
             vec![("blocks", monitor["blocks"].clone())],
@@ -178,7 +175,7 @@ pub fn hook_decision(camp: &mut Campaign, payload: &Obj) -> Res<Option<Decision>
         camp.decl.get("id").map_or("None".to_string(), py_str)
     );
     let pm = camp.pm_prefix();
-    if ge_int(&monitor["unchanged"], camp.budget("stall_stops"))? || overdue.is_some() || refused {
+    if ge_num(&monitor["unchanged"], camp.budget("stall_stops"))? || overdue.is_some() || refused {
         let item = overdue.unwrap_or(&items[0]).clone(); // rule 7
         let key = py_str(&item["key"]);
         let stalls = match monitor.get_mut("stalls") {
@@ -192,8 +189,7 @@ pub fn hook_decision(camp: &mut Campaign, payload: &Obj) -> Res<Option<Decision>
         let count = plus_one(stalls.get(&key).unwrap_or(&Value::from(0)))?;
         stalls.insert(key.clone(), count.clone());
         monitor.insert("unchanged".into(), Value::from(0));
-        let count_i = num(&count)?.as_f64() as i64;
-        let (name, text) = directive(&pm, &item, count_i, camp.budget("stall_retries"))?;
+        let (name, text) = directive(&pm, &item, num(&count)?, camp.budget("stall_retries"))?;
         camp.emit(
             "hang",
             vec![

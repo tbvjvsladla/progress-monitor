@@ -108,10 +108,11 @@ pub fn decide(
         plan.reason = Some("same-input-fail".into());
         return Ok(plan);
     }
-    let cap = camp.budget("exec_retries")
-        + 1
-        + camp.allows("exec-retry-cap", vec![("check", Value::from(id.as_str()))])?;
-    if same.len() as i64 >= cap {
+    let cap = camp
+        .budget("exec_retries")
+        .plus(Num::Int(1))
+        .plus(camp.allows("exec-retry-cap", vec![("check", Value::from(id.as_str()))])?);
+    if Num::Int(same.len() as i128).ge(cap) {
         let mut plan = Plan::new(Action::Refuse, "refused", 5, fp);
         plan.receipt = same.last().and_then(path_of);
         plan.reason = Some("exec-retry-cap".into());
@@ -194,7 +195,7 @@ pub fn covered_inputs(camp: &mut Campaign, check: &Obj, root: &Path) -> Res<Obj>
 fn timeout_of(camp: &Campaign, check: &Obj) -> Res<f64> {
     match check.get("timeout_s") {
         Some(v) if truthy(v) => Ok(num(v)?.as_f64()),
-        _ => Ok(camp.budget("check_timeout_s") as f64),
+        _ => Ok(camp.budget("check_timeout_s").as_f64()),
     }
 }
 
@@ -242,14 +243,14 @@ pub fn run_check(
         "FAIL"
     };
     let _guard = camp.lock(None)?;
-    let mut number = Num::Int(0);
-    for r in camp.receipts(&id)? {
-        let n = num(r.get("n").unwrap_or(&Value::from(0)))?;
-        if n.compare(number) == Some(std::cmp::Ordering::Greater) {
-            number = n;
-        }
-    }
-    let number = plus_one(&number.to_value())?;
+    let mut numbers: Vec<Value> = camp
+        .receipts(&id)?
+        .iter()
+        .map(|r| r.get("n").cloned().unwrap_or(Value::from(0)))
+        .collect();
+    numbers.push(Value::from(0));
+    let largest = crate::py::py_max(&numbers)?.unwrap_or(Value::from(0));
+    let number = plus_one(&largest)?;
     let n_text = py_str(&number);
     let log = format!("logs/{id}-{n_text}.log");
     if temp.exists() {
@@ -287,7 +288,7 @@ pub fn run_check(
         ("log", Value::from(log.as_str())),
         ("started", Value::from(done.started.as_str())),
         ("ended", Value::from(done.ended.as_str())),
-        ("seconds", Value::from(done.seconds)),
+        ("seconds", crate::py::float_value(done.seconds)),
         ("executor", Value::from(camp.executor.as_str())),
         ("forced", Value::Bool(forced)),
         ("reason", opt(&receipt_reason)),
@@ -412,7 +413,7 @@ pub fn force_cap(camp: &mut Campaign, check: &str) -> Res<Option<&'static str>> 
     let per_check = forced
         .iter()
         .filter(|r| eq_str(r.get("check"), check))
-        .count() as i64;
+        .count() as i128;
     let allowed = camp.allows(
         "forced-rerun-cap",
         vec![
@@ -420,11 +421,11 @@ pub fn force_cap(camp: &mut Campaign, check: &str) -> Res<Option<&'static str>> 
             ("cap", Value::from("per-check")),
         ],
     )?;
-    if per_check >= camp.budget("forced_reruns_per_check") + allowed {
+    if Num::Int(per_check).ge(camp.budget("forced_reruns_per_check").plus(allowed)) {
         return Ok(Some("per-check"));
     }
     let allowed = camp.allows("forced-rerun-cap", vec![("cap", Value::from("total"))])?;
-    if forced.len() as i64 >= camp.budget("forced_reruns_total") + allowed {
+    if Num::Int(forced.len() as i128).ge(camp.budget("forced_reruns_total").plus(allowed)) {
         return Ok(Some("total"));
     }
     Ok(None)

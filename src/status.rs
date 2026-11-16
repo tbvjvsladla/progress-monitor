@@ -9,8 +9,8 @@ use crate::error::{PmError, Res};
 use crate::jsonio::read_json;
 use crate::proc::git;
 use crate::py::{
-    as_obj, eq_str, list_or_empty, need, num, obj, opt_truthy, py_eq, py_str, round3, truthy, Num,
-    Obj,
+    as_obj, eq_str, float_value, list_or_empty, need, num, obj, opt_truthy, py_eq, py_str, round3,
+    truthy, Num, Obj,
 };
 use crate::time::{now, parse_time};
 use crate::FINAL;
@@ -340,7 +340,7 @@ pub fn briefing_due(camp: &mut Campaign) -> Res<Obj> {
     let mut by_hours = false;
     if let Some(hours @ Value::Number(_)) = briefing.get("every_hours") {
         let hours = num(hours)?;
-        if hours.as_f64() > 0.0 {
+        if hours.gt(Num::Int(0)) {
             if let Some(anchor) = anchor {
                 let budget = crate::time::timedelta_us(hours, 3_600_000_000)?;
                 by_hours = i128::from(now().utc_us - anchor.utc_us) >= budget;
@@ -526,7 +526,16 @@ fn float_or_zero(value: Option<&Value>) -> Res<f64> {
                     crate::py::repr_str(s)
                 ))
             }),
-            other => Ok(num(other)?.as_f64()),
+            Value::Number(n) if crate::py::is_int(v) && crate::py::number_f64(n).is_infinite() => {
+                Err(PmError::Internal(
+                    "OverflowError: int too large to convert to float".into(),
+                ))
+            }
+            Value::Number(_) | Value::Bool(_) => Ok(num(v)?.as_f64()),
+            other => Err(PmError::Internal(format!(
+                "TypeError: float() argument must be a string or a real number, not '{}'",
+                crate::py::type_name(other)
+            ))),
         },
         _ => Ok(0.0),
     }
@@ -556,14 +565,14 @@ pub fn build_metrics(camp: &mut Campaign) -> Res<Obj> {
             let entry = gates.entry(name).or_insert_with(|| {
                 Value::Object(obj([
                     ("runs", Value::from(0)),
-                    ("seconds", Value::from(0.0)),
+                    ("seconds", float_value(0.0)),
                 ]))
             });
             if let Value::Object(entry) = entry {
                 let runs = num(&entry["runs"])?.plus(Num::Int(1)).to_value();
                 let total = num(&entry["seconds"])?.as_f64() + seconds;
                 entry.insert("runs".into(), runs);
-                entry.insert("seconds".into(), Value::from(round3(total)));
+                entry.insert("seconds".into(), float_value(round3(total)));
             }
         }
     }
@@ -575,9 +584,9 @@ pub fn build_metrics(camp: &mut Campaign) -> Res<Obj> {
     let total = executed + skipped;
     let ratio = |n: i64| {
         if total > 0 {
-            Value::from(round3(n as f64 / total as f64))
+            float_value(round3(n as f64 / total as f64))
         } else {
-            Value::from(0.0)
+            float_value(0.0)
         }
     };
     let mut count_map = Obj::new();
@@ -607,7 +616,7 @@ pub fn build_metrics(camp: &mut Campaign) -> Res<Obj> {
             if receipts.is_empty() {
                 Value::from(0)
             } else {
-                Value::from(round3(check_seconds))
+                float_value(round3(check_seconds))
             },
         ),
         ("gates", Value::Object(gates)),

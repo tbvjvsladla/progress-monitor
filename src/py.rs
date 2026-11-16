@@ -58,16 +58,36 @@ impl Num {
         }
     }
 
+    /// Ordering as the baseline compared numbers: int with float exactly,
+    /// None when a NaN is involved.
     pub fn compare(self, other: Num) -> Option<Ordering> {
         match (self, other) {
             (Num::Int(a), Num::Int(b)) => Some(a.cmp(&b)),
-            (a, b) => a.as_f64().partial_cmp(&b.as_f64()),
+            (Num::Int(a), Num::Float(b)) => int_float_cmp(a, b),
+            (Num::Float(a), Num::Int(b)) => int_float_cmp(b, a).map(Ordering::reverse),
+            (Num::Float(a), Num::Float(b)) => a.partial_cmp(&b),
         }
     }
 
+    /// `self >= other`; false when a NaN is involved.
+    pub fn ge(self, other: Num) -> bool {
+        matches!(
+            self.compare(other),
+            Some(Ordering::Greater | Ordering::Equal)
+        )
+    }
+
+    /// `self > other`; false when a NaN is involved.
+    pub fn gt(self, other: Num) -> bool {
+        self.compare(other) == Some(Ordering::Greater)
+    }
+
+    /// `self + other`. An int sum outside i128 goes on as a float (intended change 8).
     pub fn plus(self, other: Num) -> Num {
         match (self, other) {
-            (Num::Int(a), Num::Int(b)) => Num::Int(a + b),
+            (Num::Int(a), Num::Int(b)) => a
+                .checked_add(b)
+                .map_or_else(|| Num::Float(a as f64 + b as f64), Num::Int),
             (a, b) => Num::Float(a.as_f64() + b.as_f64()),
         }
     }
@@ -80,7 +100,100 @@ impl Num {
     }
 }
 
-fn type_name(value: &Value) -> &'static str {
+/// `list.sort` with a `<` that may fail or be inconsistent (NaN): below 64 items
+/// the baseline's run detection and binary insertion, so the order is the
+/// baseline's for any comparison; from 64 on a stable merge sort, which agrees
+/// with it whenever `<` is a consistent order.
+pub fn py_sort<T>(items: &mut [T], mut lt: impl FnMut(&T, &T) -> Res<bool>) -> Res<()> {
+    let n = items.len();
+    if n < 2 {
+        return Ok(());
+    }
+    if n >= 64 {
+        let mut failure = None;
+        items.sort_by(|a, b| {
+            if failure.is_some() {
+                return Ordering::Equal;
+            }
+            let order = lt(a, b).and_then(|less| {
+                Ok(if less {
+                    Ordering::Less
+                } else if lt(b, a)? {
+                    Ordering::Greater
+                } else {
+                    Ordering::Equal
+                })
+            });
+            order.unwrap_or_else(|e| {
+                failure = Some(e);
+                Ordering::Equal
+            })
+        });
+        return failure.map_or(Ok(()), Err);
+    }
+    // count_run
+    let mut run = 2;
+    if lt(&items[1], &items[0])? {
+        while run < n && lt(&items[run], &items[run - 1])? {
+            run += 1;
+        }
+        items[..run].reverse();
+    } else {
+        while run < n && !lt(&items[run], &items[run - 1])? {
+            run += 1;
+        }
+    }
+    // binarysort
+    for start in run..n {
+        let (mut l, mut r) = (0, start);
+        while l < r {
+            let p = l + ((r - l) >> 1);
+            if lt(&items[start], &items[p])? {
+                r = p;
+            } else {
+                l = p + 1;
+            }
+        }
+        items[l..=start].rotate_right(1);
+    }
+    Ok(())
+}
+
+/// Exact comparison of an int with a float (no rounding of the int).
+fn int_float_cmp(a: i128, b: f64) -> Option<Ordering> {
+    const LIMIT: f64 = 170_141_183_460_469_231_731_687_303_715_884_105_728.0; // 2**127
+    if b.is_nan() {
+        return None;
+    }
+    if b >= LIMIT {
+        return Some(Ordering::Less);
+    }
+    if b < -LIMIT {
+        return Some(Ordering::Greater);
+    }
+    let whole = b.trunc();
+    let by_whole = a.cmp(&(whole as i128));
+    Some(match by_whole {
+        Ordering::Equal => 0.0f64.partial_cmp(&(b - whole)).unwrap_or(Ordering::Equal),
+        other => other,
+    })
+}
+
+/// `max(values)`: the first of the largest, compared with `>` as the baseline did.
+pub fn py_max(values: &[Value]) -> Res<Option<Value>> {
+    let mut best: Option<(&Value, Num)> = None;
+    for value in values {
+        let n = num(value)?;
+        match best {
+            Some((_, b)) if !n.gt(b) => {}
+            _ => best = Some((value, n)),
+        }
+    }
+    Ok(best.map(|(v, _)| v.clone()))
+}
+
+/// The baseline's type name of a value (`int`, `float`, `str`, `list`, `dict`, ...).
+pub fn type_name(value: &Value) -> &'static str {
     match value {
         Value::Null => "NoneType",
         Value::Bool(_) => "bool",
@@ -113,9 +226,9 @@ pub fn num_cmp(a: &Value, b: &Value) -> Res<Ordering> {
     Ok(x.compare(y).unwrap_or(Ordering::Equal))
 }
 
-/// `a >= b` where b is an integer budget.
-pub fn ge_int(a: &Value, b: i64) -> Res<bool> {
-    Ok(num_cmp(a, &Value::from(b))? != Ordering::Less)
+/// `a >= b` for a value and a number (false when a NaN is involved).
+pub fn ge_num(a: &Value, b: Num) -> Res<bool> {
+    Ok(num(a)?.ge(b))
 }
 
 /// An int that is not a bool.
@@ -166,7 +279,10 @@ pub fn py_repr(value: &Value) -> String {
         Value::Null => "None".to_string(),
         Value::Bool(true) => "True".to_string(),
         Value::Bool(false) => "False".to_string(),
-        Value::Number(n) => number_text(n),
+        Value::Number(n) => match int_text(n) {
+            Some(text) => text.to_string(),
+            None => float_str(number_f64(n)),
+        },
         Value::String(s) => repr_str(s),
         Value::Array(items) => {
             let parts: Vec<String> = items.iter().map(py_repr).collect();
@@ -286,6 +402,17 @@ pub fn utf8_error_text(bytes: &[u8], err: std::str::Utf8Error) -> String {
     }
 }
 
+/// `repr`/`str` of a float: `nan`, `inf`, `-inf`, else [`float_repr`].
+pub fn float_str(x: f64) -> String {
+    if x.is_nan() {
+        "nan".to_string()
+    } else if x.is_infinite() {
+        if x > 0.0 { "inf" } else { "-inf" }.to_string()
+    } else {
+        float_repr(x)
+    }
+}
+
 /// Shortest round-trip float text with the baseline's exponent rule
 /// (fixed for 1e-4 <= |x| < 1e16, otherwise `1e-05`, `1.5e+16`).
 pub fn float_repr(x: f64) -> String {
@@ -329,14 +456,28 @@ pub fn round3(x: f64) -> f64 {
     format!("{x:.3}").parse().unwrap_or(x)
 }
 
-/// The `{:g}` text of a float (six significant digits, no trailing zeros).
+/// The `{:g}` text of a float: six significant digits, trailing zeros dropped,
+/// exponent form below 1e-4 and from 1e6 on (`1e-07`, `1.23457e+06`, `inf`, `nan`).
 pub fn g_format(x: f64) -> String {
-    if x.is_finite() && x.fract() == 0.0 && x.abs() < 1e16 {
-        return format!("{}", x as i64);
+    if !x.is_finite() {
+        return float_str(x);
     }
-    let text = format!("{x:.6}");
-    let text = text.trim_end_matches('0').trim_end_matches('.');
-    text.to_string()
+    let sci = format!("{x:.5e}");
+    let (mantissa, exp) = sci.split_once('e').unwrap_or((&sci, "0"));
+    let exp: i32 = exp.parse().unwrap_or(0);
+    let trim = |t: &str| {
+        if t.contains('.') {
+            t.trim_end_matches('0').trim_end_matches('.').to_string()
+        } else {
+            t.to_string()
+        }
+    };
+    if (-4..6).contains(&exp) {
+        trim(&format!("{x:.*}", (5 - exp) as usize))
+    } else {
+        let esign = if exp < 0 { '-' } else { '+' };
+        format!("{}e{esign}{:02}", trim(mantissa), exp.abs())
+    }
 }
 
 /// Whitespace as `str.isspace` sees it.
@@ -523,19 +664,6 @@ mod tests {
     }
 }
 
-/// An int number as i64, saturated at the ends (the baseline's ints had no bound).
-pub fn int_saturating(value: &Value) -> Option<i64> {
-    let Value::Number(n) = value else {
-        return None;
-    };
-    let text = int_text(n)?;
-    Some(match text.parse::<i128>() {
-        Ok(i) => i.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64,
-        Err(_) if text.starts_with('-') => i64::MIN,
-        Err(_) => i64::MAX,
-    })
-}
-
 /// First code points of the Unicode decimal digit runs (`0` of each run of ten),
 /// from the Unicode 15.0 database of the baseline interpreter (3.12).
 const DECIMAL_ZEROS: [u32; 68] = [
@@ -563,14 +691,14 @@ pub fn py_float(text: &str) -> Option<f64> {
     let ascii: String = text
         .chars()
         .map(|ch| {
-            if is_space(ch) {
+            if (ch as u32) < 127 {
+                ch
+            } else if is_space(ch) {
                 ' '
             } else if let Some(d) = decimal_value(ch) {
                 char::from_digit(d, 10).unwrap_or('?')
-            } else if (ch as u32) > 127 {
-                '?'
             } else {
-                ch
+                '?'
             }
         })
         .collect();
@@ -622,6 +750,103 @@ pub fn py_float(text: &str) -> Option<f64> {
     body.parse().ok()
 }
 
+/// `int(value)` for a value read from JSON. An int outside i128 (and the int of
+/// a float outside it) goes on as a float (intended change 8).
+pub fn py_int(value: &Value) -> Res<Num> {
+    match value {
+        Value::Bool(b) => Ok(Num::Int(i128::from(*b))),
+        Value::Number(n) => match Num::of(value) {
+            Some(whole) if is_int(value) => Ok(whole), // outside i128 it stays a float
+            _ => float_to_int(number_f64(n)),
+        },
+        Value::String(s) => int_of_text(s).ok_or_else(|| {
+            let shown: String = repr_str(s).chars().take(200).collect();
+            PmError::Internal(format!(
+                "ValueError: invalid literal for int() with base 10: {shown}"
+            ))
+        })?,
+        other => Err(PmError::Internal(format!(
+            "TypeError: int() argument must be a string, a bytes-like object or a real number, not '{}'",
+            type_name(other)
+        ))),
+    }
+}
+
+fn float_to_int(x: f64) -> Res<Num> {
+    const LIMIT: f64 = 170_141_183_460_469_231_731_687_303_715_884_105_728.0; // 2**127
+    if x.is_nan() {
+        return Err(PmError::Internal(
+            "ValueError: cannot convert float NaN to integer".into(),
+        ));
+    }
+    if x.is_infinite() {
+        return Err(PmError::Internal(
+            "OverflowError: cannot convert float infinity to integer".into(),
+        ));
+    }
+    let whole = x.trunc();
+    Ok(if (-LIMIT..LIMIT).contains(&whole) {
+        Num::Int(whole as i128)
+    } else {
+        Num::Float(whole)
+    })
+}
+
+/// `int(text)` in base 10: Unicode digits and spaces, a sign, underscores
+/// between digits. None where the baseline raised `invalid literal`; the
+/// digit-count limit is the baseline's error too.
+fn int_of_text(text: &str) -> Option<Res<Num>> {
+    let mut ascii = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if (ch as u32) < 127 {
+            ascii.push(ch);
+        } else if is_space(ch) {
+            ascii.push(' ');
+        } else {
+            ascii.push(char::from_digit(decimal_value(ch)?, 10)?);
+        }
+    }
+    let body =
+        ascii.trim_matches(|c: char| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r'));
+    let (negative, unsigned) = match body.as_bytes().first() {
+        Some(b'-') => (true, &body[1..]),
+        Some(b'+') => (false, &body[1..]),
+        _ => (false, body),
+    };
+    let mut digits = String::with_capacity(unsigned.len());
+    let mut prev = '_';
+    for ch in unsigned.chars() {
+        if ch == '_' {
+            if prev == '_' {
+                return None;
+            }
+        } else if ch.is_ascii_digit() {
+            digits.push(ch);
+        } else {
+            return None;
+        }
+        prev = ch;
+    }
+    if digits.is_empty() || prev == '_' {
+        return None;
+    }
+    if digits.len() > 4300 {
+        return Some(Err(PmError::Internal(format!(
+            "ValueError: Exceeds the limit (4300 digits) for integer string conversion: value has {} digits; use sys.set_int_max_str_digits() to increase the limit",
+            digits.len()
+        ))));
+    }
+    let signed = if negative {
+        format!("-{digits}")
+    } else {
+        digits
+    };
+    Some(Ok(signed.parse::<i128>().map_or_else(
+        |_| Num::Float(signed.parse().unwrap_or(f64::NAN)),
+        Num::Int,
+    )))
+}
+
 #[cfg(test)]
 mod float_tests {
     use super::*;
@@ -644,6 +869,57 @@ mod float_tests {
     }
 
     #[test]
+    fn number_edges_as_baseline() {
+        // r2-5: an int sum past i128 goes on as a float, never wraps
+        let top = Num::Int(i128::MAX);
+        assert!(matches!(top.plus(Num::Int(1)), Num::Float(x) if x > 1.7e38));
+        assert!(matches!(Num::Int(i128::MIN).plus(Num::Int(-1)), Num::Float(x) if x < -1.7e38));
+        // ints compare with floats exactly; NaN compares false both ways
+        let big = Num::Int(9_007_199_254_740_993);
+        assert!(big.gt(Num::Float(9_007_199_254_740_992.0)));
+        assert!(Num::Int(2).gt(Num::Float(1.5)) && !Num::Int(1).gt(Num::Float(1.5)));
+        assert!(!Num::Float(f64::NAN).ge(Num::Int(0)) && !Num::Int(0).ge(Num::Float(f64::NAN)));
+        assert!(Num::Float(1e300).gt(top) && Num::Int(i128::MIN).gt(Num::Float(-1e300)));
+        // r2-8: ASCII below 127 is kept as it is, so \x1c-\x1f are not spaces for float()
+        for bad in ["\x1c5", "5\x1f", "\x7f5"] {
+            assert_eq!(py_float(bad), None, "{bad:?}");
+        }
+        assert_eq!(py_float("\u{2000}5\u{3000}"), Some(5.0));
+        // `{:g}`
+        assert_eq!(g_format(-1e20), "-1e+20");
+        assert_eq!(g_format(-1234567.0), "-1.23457e+06");
+        assert_eq!(g_format(-1e-7), "-1e-07");
+        assert_eq!(g_format(123456.0), "123456");
+        assert_eq!(g_format(0.0001), "0.0001");
+        assert_eq!(g_format(-0.0), "-0");
+        assert_eq!(g_format(f64::NAN), "nan");
+        // int()
+        let int = |v: &str| py_int(&crate::jsonio::parse(v).unwrap()).map(|n| n.to_value());
+        assert_eq!(int("1e300").unwrap(), float_value(1e300));
+        assert_eq!(int("-1.5").unwrap(), Value::from(-1));
+        assert_eq!(int("\" +1_0 \"").unwrap(), Value::from(10));
+        assert!(int("NaN").is_err() && int("\"1__0\"").is_err() && int("[]").is_err());
+        // max() keeps the first of the largest
+        let max = |v: &str| py_max(crate::jsonio::parse(v).unwrap().as_array().unwrap()).unwrap();
+        assert_eq!(max("[0.0, 0, NaN]"), Some(float_value(0.0)));
+        assert_eq!(max("[0.0, 0, NaN, 5]"), Some(Value::from(5)));
+        assert!(max("[NaN, 5]").is_some_and(|v| v.as_number().is_some_and(|n| n.as_str() == "NaN")));
+        // repr of non-finite floats
+        assert_eq!(py_repr(&float_value(f64::NEG_INFINITY)), "-inf");
+    }
+
+    #[test]
+    fn sort_follows_the_baseline_with_nan() {
+        let mut items = vec![3.0, f64::NAN, 1.0, 2.0];
+        py_sort(&mut items, |a, b| Ok(a < b)).unwrap();
+        // the baseline: sorted([3.0, nan, 1.0, 2.0]) == [3.0, nan, 1.0, 2.0]
+        assert_eq!(format!("{items:?}"), "[3.0, NaN, 1.0, 2.0]");
+        let mut items = vec![5, 1, 4, 1, 3];
+        py_sort(&mut items, |a, b| Ok(a < b)).unwrap();
+        assert_eq!(items, [1, 1, 3, 4, 5]);
+    }
+
+    #[test]
     fn numbers_keep_baseline_text() {
         let v = crate::jsonio::parse(
             "[1e400, -0, -0.0, 1E5, 100000000000000000000, NaN, -Infinity, -943305.0469559873]",
@@ -654,7 +930,6 @@ mod float_tests {
             "[Infinity, 0, -0.0, 100000.0, 100000000000000000000, NaN, -Infinity, -943305.0469559873]"
         );
         assert!(is_int(&v[4]) && !is_int(&v[5]));
-        assert_eq!(int_saturating(&v[4]), Some(i64::MAX));
         assert!(truthy(&v[5]) && !truthy(&v[1]) && !truthy(&v[2]));
     }
 }

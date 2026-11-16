@@ -15,7 +15,7 @@ use crate::paths::{join, Paths};
 use crate::proc::{git, node_name, probe};
 use crate::py::{
     as_list, as_obj, as_obj_mut, contains, eq_str, is_digits, is_int, is_plain_name, list_or_empty,
-    need, num_cmp, obj, opt_truthy, py_eq, py_str, repr_str, splitlines, Obj,
+    need, num, obj, opt_truthy, py_eq, py_str, repr_str, splitlines, Num, Obj,
 };
 use crate::time::{now, parse_time, stamp, Moment};
 use crate::{FINAL, SCHEMA, SUFFIX};
@@ -184,14 +184,15 @@ impl Campaign {
         )
     }
 
-    pub fn budget(&self, name: &str) -> i64 {
+    /// A budget: the declared int (any size, bool excluded), else the default.
+    pub fn budget(&self, name: &str) -> Num {
         let fallback = DEFAULT_BUDGETS
             .iter()
             .find(|(k, _)| *k == name)
-            .map_or(0, |(_, v)| *v);
+            .map_or(Num::Int(0), |(_, v)| Num::Int(i128::from(*v)));
         match self.decl.get("budgets") {
             Some(Value::Object(b)) => match b.get(name) {
-                Some(v) if is_int(v) => crate::py::int_saturating(v).unwrap_or(fallback),
+                Some(v) if is_int(v) => Num::of(v).unwrap_or(fallback),
                 _ => fallback,
             },
             _ => fallback,
@@ -559,20 +560,13 @@ impl Campaign {
                 }
             }
         }
-        let mut failure = None;
-        found.sort_by(|a, b| {
-            let zero = Value::from(0);
-            let x = a.get("n").unwrap_or(&zero);
-            let y = b.get("n").unwrap_or(&zero);
-            num_cmp(x, y).unwrap_or_else(|e| {
-                failure = Some(e);
-                std::cmp::Ordering::Equal
-            })
-        });
-        match failure {
-            Some(e) => Err(e),
-            None => Ok(found),
-        }
+        let zero = Value::from(0);
+        crate::py::py_sort(&mut found, |a, b| {
+            let x = num(a.get("n").unwrap_or(&zero))?;
+            let y = num(b.get("n").unwrap_or(&zero))?;
+            Ok(x.compare(y) == Some(std::cmp::Ordering::Less))
+        })?;
+        Ok(found)
     }
 
     pub fn all_receipts(&self) -> Res<Vec<Obj>> {
@@ -779,7 +773,7 @@ impl Campaign {
     }
 
     /// How many answered hand-overs of this kind and target allowed one more.
-    pub fn allows(&mut self, kind: &str, target: Vec<(&str, Value)>) -> Res<i64> {
+    pub fn allows(&mut self, kind: &str, target: Vec<(&str, Value)>) -> Res<Num> {
         let mut count = 0;
         for item in self.hitls()? {
             let allowed = item["answer"]
@@ -789,7 +783,7 @@ impl Campaign {
                 count += 1;
             }
         }
-        Ok(count)
+        Ok(Num::Int(count))
     }
 
     pub fn final_names(&self) -> Res<Vec<String>> {

@@ -15,8 +15,8 @@ use crate::error::{PmError, Res};
 use crate::jsonio::{read_json, write_json};
 use crate::proc::execute;
 use crate::py::{
-    as_list, as_obj, eq_str, is_int, is_plain_name, list_or_empty, need, num_cmp, obj, plus_one,
-    py_eq, py_repr, py_str, repr_str, strip, truthy, Obj,
+    as_list, as_obj, eq_str, is_int, is_plain_name, list_or_empty, need, obj, plus_one, py_eq,
+    py_repr, py_str, repr_str, strip, truthy, Num, Obj,
 };
 use crate::time::{now, parse_time, seconds_between, stamp, stamp_now};
 use crate::{FINAL, RESERVED_EVENTS, SCHEMA, SECTIONS, TOOL};
@@ -268,9 +268,7 @@ pub fn cmd_phase_retry(camp: &mut Campaign, args: &Args) -> Out {
             ],
         ));
     }
-    if num_cmp(&data["retries"], &Value::from(camp.budget("stall_retries")))?
-        != std::cmp::Ordering::Less
-    {
+    if crate::py::ge_num(&data["retries"], camp.budget("stall_retries"))? {
         return Err(PmError::refused(
             "stall-retries-spent",
             vec![("retries", data["retries"].clone())],
@@ -349,7 +347,7 @@ pub fn cmd_phase_close(camp: &mut Campaign, args: &Args) -> Out {
         fs::write(camp.dir.join(crate::jsonio::os_text(&log)), "").map_err(|e| PmError::os(&e))?;
         (log, attempt, check, expect)
     };
-    let timeout = camp.budget("check_timeout_s") as f64;
+    let timeout = camp.budget("check_timeout_s").as_f64();
     let root = camp.root.clone();
     let done = execute(
         &check,
@@ -591,7 +589,7 @@ pub fn cmd_gate_run(camp: &mut Campaign, args: &Args) -> Out {
             vec![
                 ("group", v(group)),
                 ("state", v(state)),
-                ("seconds", Value::from(seconds)),
+                ("seconds", crate::py::float_value(seconds)),
                 ("note", note.clone()),
                 ("checks", outcomes(&results)),
             ],
@@ -773,7 +771,7 @@ pub fn cmd_final_run(camp: &mut Campaign, args: &Args) -> Out {
             "final",
             vec![
                 ("state", v(state)),
-                ("seconds", Value::from(seconds)),
+                ("seconds", crate::py::float_value(seconds)),
                 ("note", note.clone()),
                 ("checks", outcomes(&results)),
             ],
@@ -870,7 +868,7 @@ pub fn cmd_explore_open(camp: &mut Campaign, args: &Args) -> Out {
         ));
     }
     let known = explorations(camp)?.len() as i64;
-    if known >= camp.budget("explore_rounds") {
+    if Num::Int(i128::from(known)).ge(camp.budget("explore_rounds")) {
         return Err(PmError::refused(
             "explore-rounds-spent",
             vec![("rounds", Value::from(known))],
@@ -936,7 +934,7 @@ pub fn cmd_check_run(camp: &mut Campaign, args: &Args) -> Out {
         let target_text = crate::jsonio::path_text(&target);
         if target != base
             && !seen.contains(&target_text)
-            && seen.len() as i64 >= camp.budget("explore_candidates")
+            && Num::Int(seen.len() as i128).ge(camp.budget("explore_candidates"))
         {
             seen.sort();
             return Err(PmError::refused(
@@ -1005,56 +1003,26 @@ pub fn cmd_explore_close(camp: &mut Campaign, args: &Args) -> Out {
 
 // --- cells --------------------------------------------------------------------------
 
-pub fn review_round(camp: &mut Campaign, cell: &Obj) -> Res<i64> {
+/// The latest review round of a cell: `max` of `int(review_base or 0)` and the
+/// int (or bool) rounds of its review events, the value itself as the baseline kept it.
+pub fn review_round(camp: &mut Campaign, cell: &Obj) -> Res<Value> {
     let name = need(cell, "cell")?.clone();
     let base = match cell.get("review_base") {
-        Some(b) if truthy(b) => int_of(b)?,
-        _ => 0,
+        Some(b) if truthy(b) => crate::py::py_int(b)?.to_value(),
+        _ => Value::from(0),
     };
-    let mut best = base;
+    let mut rounds = vec![base];
     for e in camp.events()?.iter() {
         if eq_str(e.get("event"), "review") && e.get("cell").is_some_and(|c| py_eq(c, &name)) {
             match e.get("round") {
-                Some(Value::Bool(b)) => best = best.max(i64::from(*b)),
-                Some(r) if is_int(r) => best = best.max(crate::py::int_saturating(r).unwrap_or(0)),
+                None => rounds.push(Value::from(0)),
+                Some(r @ Value::Bool(_)) => rounds.push(r.clone()),
+                Some(r) if is_int(r) => rounds.push(r.clone()),
                 _ => {}
             }
         }
     }
-    Ok(best)
-}
-
-/// `int(value)`.
-fn int_of(value: &Value) -> Res<i64> {
-    match value {
-        Value::Bool(b) => Ok(i64::from(*b)),
-        Value::Number(n) => match crate::py::int_saturating(value) {
-            Some(i) => Ok(i),
-            None => {
-                let x = crate::py::number_f64(n);
-                if x.is_nan() {
-                    Err(PmError::Internal(
-                        "ValueError: cannot convert float NaN to integer".into(),
-                    ))
-                } else if x.is_infinite() {
-                    Err(PmError::Internal(
-                        "OverflowError: cannot convert float infinity to integer".into(),
-                    ))
-                } else {
-                    Ok(x.trunc() as i64)
-                }
-            }
-        },
-        Value::String(s) => strip(s).parse().map_err(|_| {
-            PmError::Internal(format!(
-                "ValueError: invalid literal for int() with base 10: {}",
-                repr_str(s)
-            ))
-        }),
-        _ => Err(PmError::Internal(
-            "TypeError: int() argument must be a string or a number".into(),
-        )),
-    }
+    Ok(crate::py::py_max(&rounds)?.unwrap_or(Value::from(0)))
 }
 
 fn ensure_group(
@@ -1183,8 +1151,9 @@ pub fn cmd_cell_add(camp: &mut Campaign, args: &Args) -> Out {
         .cells()?
         .iter()
         .filter(|c| eq_str(c.get("origin"), "auto"))
-        .count() as i64;
-    if autos >= camp.budget("auto_cells") + camp.allows("auto-cell-cap", vec![])? {
+        .count() as i128;
+    let allowed = camp.allows("auto-cell-cap", vec![])?;
+    if Num::Int(autos).ge(camp.budget("auto_cells").plus(allowed)) {
         let ident = camp.open_hitl(
             "auto-cell-cap",
             "스스로 만드는 cell이 상한에 닿았다. 하나 더 허용하는가?",
@@ -1192,7 +1161,7 @@ pub fn cmd_cell_add(camp: &mut Campaign, args: &Args) -> Out {
         )?;
         return Err(PmError::refused(
             "auto-cell-cap",
-            vec![("autos", Value::from(autos)), ("hitl", ident)],
+            vec![("autos", Num::Int(autos).to_value()), ("hitl", ident)],
         ));
     }
     let group_checks = match spec.get("group_checks") {
@@ -1200,7 +1169,7 @@ pub fn cmd_cell_add(camp: &mut Campaign, args: &Args) -> Out {
         _ => None,
     };
     let created = ensure_group(camp, &group, group_checks)?;
-    let (mut review, mut base) = (v("none"), 0);
+    let (mut review, mut base) = (v("none"), Value::from(0));
     if let Some(parent) = &parent {
         let i = camp.cell_index(parent)?;
         let parent_cell = camp.cell_at(i).clone();
@@ -1274,8 +1243,8 @@ pub fn cmd_cell_add(camp: &mut Campaign, args: &Args) -> Out {
         ("parent", parent_v.clone()),
         ("state", v("open")),
     ]);
-    if base != 0 {
-        entry.insert("review_base".into(), Value::from(base));
+    if truthy(&base) {
+        entry.insert("review_base".into(), base);
     }
     if let Some(Value::Array(cells)) = camp.decl.get_mut("cells") {
         cells.push(Value::Object(entry));
@@ -1607,11 +1576,11 @@ pub fn cmd_review_record(camp: &mut Campaign, args: &Args) -> Out {
             vec![("state", state_of(&cell)?)],
         ));
     }
-    let expected = review_round(camp, &cell)? + 1;
-    if !py_eq(&review["round"], &Value::from(expected)) {
+    let expected = plus_one(&review_round(camp, &cell)?)?;
+    if !py_eq(&review["round"], &expected) {
         return Err(PmError::refused(
             "round-out-of-order",
-            vec![("expected", Value::from(expected))],
+            vec![("expected", expected)],
         ));
     }
     let cap = match camp.decl.get("review") {
@@ -1623,8 +1592,8 @@ pub fn cmd_review_record(camp: &mut Campaign, args: &Args) -> Out {
         }
         _ => Value::from(3),
     };
-    let cap = match crate::py::int_saturating(&cap) {
-        Some(c) if c >= 1 => c,
+    let cap = match Num::of(&cap) {
+        Some(c) if is_int(&cap) && c.ge(Num::Int(1)) => c,
         _ => {
             return Err(PmError::usage(
                 "campaign.json: review.round_cap must be a positive integer",
@@ -1644,9 +1613,7 @@ pub fn cmd_review_record(camp: &mut Campaign, args: &Args) -> Out {
     )?;
     let mut stopped = false;
     // round equals the expected int here (checked above), so it is a number
-    let round_reached = crate::py::Num::of(&review["round"])
-        .and_then(|r| r.compare(crate::py::Num::Int(i128::from(cap))))
-        .is_some_and(|o| o != std::cmp::Ordering::Less);
+    let round_reached = crate::py::Num::of(&review["round"]).is_some_and(|r| r.ge(cap));
     if round_reached && truthy(&review["blocking"]) && !truthy(&review["clean"]) {
         set_cell_state(camp, name, "stopped")?;
         camp.save_decl()?;

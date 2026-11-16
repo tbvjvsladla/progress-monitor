@@ -47,9 +47,7 @@ pub fn take(dir: &Path, wait: Option<f64>) -> Res<LockGuard> {
         .create(true)
         .open(&path)
         .map_err(|e| PmError::os(&e))?;
-    let deadline = Duration::try_from_secs_f64(wait.max(0.0))
-        .ok()
-        .and_then(|d| Instant::now().checked_add(d));
+    let deadline = crate::proc::deadline_after(wait);
     loop {
         // SAFETY: the descriptor belongs to `file`, which outlives this call.
         let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
