@@ -13,15 +13,15 @@
   "files": [
     {
       "path": ".gitattributes",
-      "bytes": 173,
+      "bytes": 215,
       "mode": "0644",
-      "sha256": "d2d2f9dcb863615df00d517a2a2a536e802fc9db7cff25d6e25660dd89594e59"
+      "sha256": "6c86f146dfedbdff23639d23920397e223d034d26c803b5d49d211847b75d313"
     },
     {
       "path": ".gitignore",
-      "bytes": 117,
+      "bytes": 98,
       "mode": "0644",
-      "sha256": "0d28d3a9ccd584c4c73b74958e50846e0a3f22d5cb962267219b2de3bf0df14a"
+      "sha256": "f84828ac0cf0c5b4b3fea6901ff271124199c32be132702f74fca576efa9a65c"
     },
     {
       "path": "Cargo.lock",
@@ -43,33 +43,33 @@
     },
     {
       "path": "PORTING.md",
-      "bytes": 56576,
+      "bytes": 61546,
       "mode": "0644",
-      "sha256": "82cfcda0b190f17d45a978ca42f8910719f7bf1a68d047286fe453321ab4aad5"
+      "sha256": "8b45c0f3b6fe80ebd60f5408ce2c324d8ca7983681cdb60ddc1588fd498fc956"
     },
     {
       "path": "README.md",
-      "bytes": 16288,
+      "bytes": 17233,
       "mode": "0644",
-      "sha256": "7d40dce5897e1bb8e186027fcafcd46694054832ab2d446fab1f45e6a83f69b5"
+      "sha256": "39280bcd058802361308011baff6a569645123183a2b8202e97742ebc1b2f73e"
     },
     {
       "path": "SKILL.md",
-      "bytes": 9651,
+      "bytes": 9761,
       "mode": "0644",
-      "sha256": "df222576f8d1b3dfd89b8014e39e57598e8b2f3b712a622bc00cfc2fb12e4a81"
+      "sha256": "9963a008f817b7cef1ac6fd45840e72fa55813966fc22ebae366e6e00bb839ba"
     },
     {
       "path": "assets/campaigns/README.md",
-      "bytes": 23878,
+      "bytes": 23864,
       "mode": "0644",
-      "sha256": "9636eeb679308eae977f6e0f8666685f57f19824dc2b5a6c7d8f7ed14a6927a8"
+      "sha256": "9e7d7b666ffa1e623ad44ac7ab5dcafa28cb6d2c8b8af412189f81247311af74"
     },
     {
       "path": "assets/campaigns/_template/campaign.json",
-      "bytes": 2645,
+      "bytes": 2631,
       "mode": "0644",
-      "sha256": "7ac662d6236cdc4467f25153693aa33aff0b910a392b08e5770443f6ea91254e"
+      "sha256": "3b3dfd0577bf988aa314dd11f5bac84635061cc36503d58227664e770d6af1cf"
     },
     {
       "path": "assets/campaigns/_template/cells/_cell/cell.md",
@@ -103,9 +103,9 @@
     },
     {
       "path": "assets/examples/demo-campaign/campaign.json",
-      "bytes": 2508,
+      "bytes": 2512,
       "mode": "0644",
-      "sha256": "58a3ab5f24819bcbf68a34ebc5111bb4b5f481b29d114b07988ca2926077c74f"
+      "sha256": "8ec604f172f1a91430f847cfcd1b114717a1cb5893a1e2340df1a71d55f3818c"
     },
     {
       "path": "assets/examples/demo-campaign/cells/count/cell.md",
@@ -205,15 +205,15 @@
     },
     {
       "path": "references/hooks.md",
-      "bytes": 4003,
+      "bytes": 4286,
       "mode": "0644",
-      "sha256": "541ad79eb4dd9baf42764141e554df1d3886eb5e5ba6da9036b1890c40aa9daa"
+      "sha256": "f381b34f2c43c36878cd47e64b7e5a70e7e9e561ed75bbe702c21d99fd7411b3"
     },
     {
       "path": "references/monitor.md",
-      "bytes": 10029,
+      "bytes": 9944,
       "mode": "0644",
-      "sha256": "0982af9e7d13ad4415615a6c4695c18ca1786a473c23107b1e0f621d6d27ca19"
+      "sha256": "55041c590845da1179573a901fde0b075850911631324a1b151312f08394e728"
     },
     {
       "path": "scripts/check_campaign.py",
@@ -277,9 +277,9 @@
     },
     {
       "path": "src/campaign.rs",
-      "bytes": 28113,
+      "bytes": 28220,
       "mode": "0644",
-      "sha256": "f811f2b15408c0f64de2f93012350d93dc757ace151774717edcb149ddae8ffc"
+      "sha256": "65c7310ba6869e7b08e9d1dfe602dc5484032fe9c71475b38593216fbef0e42b"
     },
     {
       "path": "src/checks.rs",

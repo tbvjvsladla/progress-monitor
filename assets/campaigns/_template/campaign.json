@@ -11,8 +11,8 @@
     "budgets는 이 캠페인의 상한이다. plan에서 승인받은 값으로 적는다.",
     "briefing은 캠페인을 열 때 사용자에게 물어 실행기의 open 인자로 준다.",
     "review.round_cap은 새 맥락 검토의 회차 상한이다. 3보다 크게 적으려면 plan에 사용자 승인을 남긴다.",
-    "실행: python3 -B <스킬 폴더>/scripts/pm.py status",
-    "검사: python3 -B <스킬 폴더>/scripts/check_campaign.py campaigns/<camp-id>"
+    "실행: <스킬 폴더>/target/release/pm status",
+    "검사: <스킬 폴더>/target/release/check_campaign campaigns/<camp-id>"
   ],
   "schema_version": 2,
   "id": "<<FILL>>",

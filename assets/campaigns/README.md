@@ -44,7 +44,7 @@ campaigns/
 | `evidence_pointers.json` | 원시 근거와 문서의 경로 | 메인 에이전트가 추가한다 |
 | `briefing.md` | 최신 브리핑 | 브리핑 작성자(새 맥락의 서브에이전트) |
 
-아래에서 `pm`은 실행기 `python3 -B <스킬 폴더>/scripts/pm.py`, `lint`는 `python3 -B <스킬 폴더>/scripts/check_campaign.py`다. 실행기는 안내 출력에 이 프로젝트의 실제 경로를 적는다. `ACTIVE`에는 활성 인스턴스의 이름 하나만 적는다. 없으면 활성 캠페인이 없는 것이다.
+아래에서 `pm`은 실행기 `<스킬 폴더>/target/release/pm`, `lint`는 `<스킬 폴더>/target/release/check_campaign`다. 실행기는 안내 출력에 이 프로젝트의 실제 경로를 적는다. `ACTIVE`에는 활성 인스턴스의 이름 하나만 적는다. 없으면 활성 캠페인이 없는 것이다.
 
 실행기와 lint는 신뢰 경계가 아니다. 파일의 소유자가 손으로 고쳐 상태를 꾸미는 것을 막지 못한다.
 

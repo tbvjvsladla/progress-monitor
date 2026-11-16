@@ -7,7 +7,8 @@
 - 훅 때문에 세션이 끝나지 않으면 `campaigns/ACTIVE`를 지운다.
 - 훅은 어떤 경우에도 종료 코드 0으로 끝난다. 안에서 오류가 나면 막지 않는다.
 - 아래 형식은 2026-11-15에 각 하네스의 공식 문서에서 확인한 것이다. 하네스가 바뀌면 다시 확인한다.
-- `pm.py init --apply`는 훅 파일이 없을 때만 아래 내용으로 만든다. 파일이 있으면 고치지 않고 넣을 조각을 출력한다. 조각의 경로는 실제 스킬 위치로 채워진다. 아래 예시는 `.claude/skills/progress-monitor/`에 둔 경우다.
+- `pm init --apply`는 훅 파일이 없을 때만 아래 내용으로 만든다. 파일이 있으면 고치지 않고 넣을 조각을 출력한다. 조각의 경로는 실제 스킬 위치로 채워진다. 아래 예시는 `.claude/skills/progress-monitor/`에 둔 경우다.
+- 훅은 빌드한 실행 파일 `<스킬 폴더>/target/release/pm`을 부른다. 설치 계약: 스킬 폴더를 복사한 뒤 그 안에서 `cargo build --release --locked`를 한 번 돈다. 빌드하지 않은 설치에서는 실행 파일이 없어 훅 명령이 셸에서 127로 실패한다.
 
 ## Claude Code
 
@@ -21,7 +22,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -B \"${CLAUDE_PROJECT_DIR}/.claude/skills/progress-monitor/scripts/pm.py\" stop-hook --harness claude",
+            "command": "\"${CLAUDE_PROJECT_DIR}/.claude/skills/progress-monitor/target/release/pm\" stop-hook --harness claude",
             "timeout": 30
           }
         ]
@@ -49,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -B .claude/skills/progress-monitor/scripts/pm.py stop-hook --harness codex",
+            "command": ".claude/skills/progress-monitor/target/release/pm stop-hook --harness codex",
             "timeout": 30
           }
         ]

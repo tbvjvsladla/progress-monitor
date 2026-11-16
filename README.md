@@ -2,7 +2,7 @@
 
 > **여러 세션에 걸쳐 오래 도는 개선 작업(Long Time E2E)을, 꼭 필요한 검증만 한 번씩 돌리며 멈추지 않고 이어 가게 하는 캠페인 운영 스킬입니다.**
 >
-> 배포 버전 **2.0.0** · 브랜치 `main` · Python 3.9+ 표준 라이브러리 · Git · Claude Code와 Codex 프로젝트 스킬용 전체 폴더 패키지
+> 배포 버전 **2.0.0** · 브랜치 `logic-rust` · Rust(cargo, 설치 때 빌드) · Git · Claude Code와 Codex 프로젝트 스킬용 전체 폴더 패키지
 
 ## 해결하려는 문제: 하루를 넘기는 작업은 대화 기억으로 이어 갈 수 없습니다
 
@@ -21,7 +21,7 @@ wiki-desk를 설치하면 프로젝트에 `__llm-wiki/`가 생기고, wiki-desk 
 
 ```text
 사용자 ─ 메인 에이전트 ─┬─ progress-monitor 스킬 (표면: 언제 무엇을 하는가, SKILL.md · references/)
-                        │      └─ pm.py 실행기 (상태·gate·영수증·사건을 쓴다)
+                        │      └─ pm 실행기 (상태·gate·영수증·사건을 쓴다)
                         │                 │
                         │                 ▼
                         └────────── campaigns/<camp-id>/ (기동하는 층: 선언·cell·gate·영수증·여정)
@@ -31,7 +31,7 @@ wiki-desk를 설치하면 프로젝트에 `__llm-wiki/`가 생기고, wiki-desk 
 
 | 자리 | 담는 것 | 추적 |
 |---|---|---|
-| `.claude/skills/progress-monitor/` (또는 `.agents/skills/`) | 운영 규칙(`SKILL.md`, `references/`), 실행기 `scripts/pm.py`, 형식 검사 `scripts/check_campaign.py` | 추적 |
+| `.claude/skills/progress-monitor/` (또는 `.agents/skills/`) | 운영 규칙(`SKILL.md`, `references/`), 실행기 `target/release/pm`, 형식 검사 `target/release/check_campaign`(설치 때 빌드) | 추적 |
 | `campaigns/README.md`, `campaigns/_template/` | 파일 구조와 형식의 정본, 인스턴스 뼈대 | 추적 |
 | `campaigns/<camp-id>/`, `campaigns/ACTIVE` | 실제로 도는 캠페인과 활성 표시 | 로컬(권장) |
 | `.claude/settings.local.json`, `.codex/hooks.json` | 종료 훅 | 로컬 |
@@ -79,7 +79,9 @@ wiki-desk를 설치하면 프로젝트에 `__llm-wiki/`가 생기고, wiki-desk 
 
 ## 설치 여정 1: 스킬 폴더 넣기
 
-준비물은 Python 3.9 이상과 Git입니다. Linux와 macOS에서 동작합니다(잠금에 `fcntl`을 씁니다). 없으면 차단 사유를 보고하고 자동 설치하지 않습니다.
+준비물은 Rust(cargo)와 Git입니다. Linux에서 검사했고 macOS는 검사하지 않았습니다(잠금에 `flock`을 씁니다). 없으면 차단 사유를 보고하고 자동 설치하지 않습니다.
+
+이전 판(1.x)은 `logic-py` 브랜치에 있습니다. 판 사이의 대응과 의도한 차이는 `PORTING.md`에 있습니다.
 
 **폴더 전체가 한 단위입니다.** `SKILL.md`만 복사하면 실행기와 뼈대가 빠집니다. 같은 이름의 스킬이 이미 있으면 덮어쓰지 말고 차이를 먼저 검토하세요.
 
@@ -89,17 +91,19 @@ wiki-desk를 설치하면 프로젝트에 `__llm-wiki/`가 생기고, wiki-desk 
 (
   set -euo pipefail
   SOURCE="/absolute/path/to/progress-monitor"   # 이 저장소를 받은 폴더(git clone)
-  VERSION="v1.0.0"
+  VERSION="v2.0.0"
   PROJECT="/absolute/path/to/project"           # 설치할 프로젝트 루트
   DEST="$PROJECT/.claude/skills/progress-monitor"
 
   test ! -e "$DEST" || { echo "이미 있음: $DEST (차이를 먼저 검토)"; exit 1; }
   mkdir -p "$DEST"
   git -C "$SOURCE" archive "$VERSION" | tar -x -C "$DEST"
-  python3 -B "$DEST/scripts/package_manifest.py" --check "$DEST"   # MANIFEST OK
+  (cd "$DEST" && cargo build --release --locked)                   # 실행 파일 빌드
+  "$DEST/target/release/package_manifest" --check "$DEST"          # MANIFEST OK
 )
 ```
 
+- **설치 계약:** 스킬 폴더를 복사한 뒤 그 안에서 `cargo build --release --locked`를 한 번 돕니다. 빌드하지 않으면 `target/release/pm`이 없어 명령이 실패하고, 종료 훅은 셸에서 127로 실패합니다. 빌드 산출물 `target/`은 추적하지 않습니다.
 - **Claude Code**는 `.claude/skills/progress-monitor/`를 프로젝트 스킬로 읽습니다.
 - **Codex**만 쓰면 위 `DEST`를 `$PROJECT/.agents/skills/progress-monitor`로 바꿉니다.
 - **둘 다** 쓰면 한쪽에 설치하고 다른 쪽은 디렉터리 심볼릭 링크로 잇습니다.
@@ -116,9 +120,9 @@ wiki-desk를 설치하면 프로젝트에 `__llm-wiki/`가 생기고, wiki-desk 
 프로젝트 루트에서 `init`을 부릅니다. 기본은 **무엇을 만들지 보이기만** 합니다.
 
 ```bash
-python3 -B .claude/skills/progress-monitor/scripts/pm.py init            # dry-run: created / kept / hooks
-python3 -B .claude/skills/progress-monitor/scripts/pm.py init --apply    # 실제로 만든다
-python3 -B .claude/skills/progress-monitor/scripts/check_campaign.py     # 틀 검사: "status": "PASS"
+.claude/skills/progress-monitor/target/release/pm init            # dry-run: created / kept / hooks
+.claude/skills/progress-monitor/target/release/pm init --apply    # 실제로 만든다
+.claude/skills/progress-monitor/target/release/check_campaign     # 틀 검사: "status": "PASS"
 ```
 
 - `--apply`는 `campaigns/README.md`와 `campaigns/_template/`를 만듭니다. **이미 있는 파일은 고치지 않고** `kept`로 보고합니다. 여러 번 불러도 같습니다.
@@ -134,11 +138,11 @@ python3 -B .claude/skills/progress-monitor/scripts/check_campaign.py     # 틀 �
 3. 에이전트에게 "progress-monitor로 캠페인을 열어줘"라고 요청합니다. 에이전트는 브리핑 설정 두 가지를 묻고 `open`을 부른 뒤, `status`의 할 일을 위에서부터 합니다.
 4. 끝나면 마지막 전체 검증의 결과가 checklist에 통합 검증으로 적힙니다. **수용은 사람이 합니다.** 실행기와 lint는 수용을 판정하지 않습니다.
 
-움직이는 예를 보려면 `assets/examples/`의 합성 캠페인을 보세요. cell 둘, 묶음 하나, 마지막 전체 검증 하나로 된 작은 예제이며, `scripts/smoke_install.py`가 빈 임시 프로젝트에 설치해 끝까지 돌립니다.
+움직이는 예를 보려면 `assets/examples/`의 합성 캠페인을 보세요. cell 둘, 묶음 하나, 마지막 전체 검증 하나로 된 작은 예제이며, `target/release/smoke_install`이 빈 임시 프로젝트에 설치해 끝까지 돌립니다.
 
 ## 명령 요약
 
-`python3 -B <스킬 폴더>/scripts/pm.py [--campaigns <폴더>] [--executor <실행자>] <명령>`. 출력은 JSON입니다. 종료 코드는 성공 0, 검사 실패나 거절 1, 사용법 오류나 읽을 수 없는 입력 2입니다(`stop-hook`은 늘 0).
+`<스킬 폴더>/target/release/pm [--campaigns <폴더>] [--executor <실행자>] <명령>`. 출력은 JSON입니다. 종료 코드는 성공 0, 검사 실패나 거절 1, 사용법 오류나 읽을 수 없는 입력 2입니다(`stop-hook`은 늘 0).
 
 | 무리 | 명령 |
 |---|---|
@@ -157,32 +161,38 @@ python3 -B .claude/skills/progress-monitor/scripts/check_campaign.py     # 틀 �
 ```text
 progress-monitor/
 ├─ SKILL.md                 운영 규칙(언제 무엇을 하는가)과 명령
-├─ README.md · LICENSE · PACKAGE_MANIFEST.json
+├─ README.md · LICENSE · PACKAGE_MANIFEST.json · PORTING.md
+├─ Cargo.toml · Cargo.lock  crate 선언과 잠긴 의존성
 ├─ references/              gate.md · monitor.md · direction.md · hooks.md · contract.md
-├─ scripts/
-│  ├─ pm.py                 실행기 (init 포함)
-│  ├─ check_campaign.py     틀·인스턴스 형식 검사(읽기만 함, 자체 음성 대조 포함)
-│  ├─ smoke_install.py      빈 임시 프로젝트 설치 연기
-│  ├─ sanitize_check.py     배포 위생 검사(배포자용)
-│  └─ package_manifest.py   PACKAGE_MANIFEST 생성·검증(배포자용)
+├─ src/
+│  ├─ lib.rs · *.rs          실행기·lint·위생·manifest·설치의 공통 모듈
+│  ├─ lint/                 형식 검사 규칙
+│  └─ bin/
+│     ├─ pm.rs              실행기 (init 포함)
+│     ├─ check_campaign.rs  틀·인스턴스 형식 검사(읽기만 함, 자체 음성 대조 포함)
+│     ├─ smoke_install.rs   빈 임시 프로젝트 설치 연기
+│     ├─ sanitize_check.rs  배포 위생 검사(배포자용)
+│     └─ package_manifest.rs PACKAGE_MANIFEST 생성·검증(배포자용)
 ├─ assets/
 │  ├─ campaigns/            init이 깔 README.md와 _template/
 │  └─ examples/             합성 예제 캠페인과 그 대상
-└─ tests/                   test_pm.py(실행기 회귀) · test_package.py(설치·배포)
+├─ tests/                   *.rs(실행기 회귀 · 설치·배포)
+└─ target/                  빌드 산출물(추적하지 않음, 설치 때 cargo build --release --locked)
 ```
 
 ## 배포자용: 태그 전에 통과해야 하는 것
 
 ```bash
-python3 -B scripts/sanitize_check.py              # SANITIZE OK (0 hits)
-python3 -B -m unittest discover -s tests -v       # 실행기 회귀 + init·위생·버전·설치 연기
-python3 -B scripts/smoke_install.py               # 마지막 줄 SMOKE-PASS
-python3 -B scripts/package_manifest.py            # 파일을 바꿨으면 다시 쓴다
-python3 -B scripts/package_manifest.py --check    # MANIFEST OK
+cargo build --release --locked                  # 먼저 빌드
+target/release/sanitize_check                   # SANITIZE OK (0 hits)
+cargo test --locked                             # 실행기 회귀 + init·위생·버전·설치 연기
+target/release/smoke_install                    # 마지막 줄 SMOKE-PASS
+target/release/package_manifest                 # 파일을 바꿨으면 다시 쓴다
+target/release/package_manifest --check         # MANIFEST OK
 ```
 
-- 위생 검사는 사이트 이름, 개인 홈 경로, 사설 IP, 전자우편 주소, 이 패키지를 떼어 낸 프로젝트의 식별자를 찾습니다. 금지 패턴은 `scripts/sanitize_check.py`의 `FORBIDDEN` 한 곳에 있습니다.
-- 버전은 `SKILL.md`의 `metadata.version` 한 곳에 둡니다. 이 README와 `PACKAGE_MANIFEST.json`의 버전이 그 값과 같은지 시험이 확인합니다.
+- 위생 검사는 사이트 이름, 개인 홈 경로, 사설 IP, 전자우편 주소, 이 패키지를 떼어 낸 프로젝트의 식별자를 찾습니다. 금지 패턴은 `src/sanitize.rs`의 `baseline_patterns` 한 곳에 있습니다.
+- 버전은 `SKILL.md`의 `metadata.version` 한 곳에 둡니다. 이 README, `PACKAGE_MANIFEST.json`, `Cargo.toml`의 버전이 그 값과 같은지 시험이 확인합니다.
 
 ## 한계
 

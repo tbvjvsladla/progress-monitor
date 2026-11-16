@@ -2,7 +2,7 @@
 name: progress-monitor
 description: "2계층 캠페인을 수행할 때 쓴다. 검증을 묶음의 gate에서만 한 번 돌리고(재사용·덮임·재실행 거절), 단계를 새 맥락의 수행자에게 넘기며, 정체를 알아채 우회하고, 수행 중의 방향 조정과 사람에게 넘김을 기록한다. 캠페인이 없는 과업에는 쓰지 않는다."
 metadata:
-  runtime: "Python 3.9+ 표준 라이브러리, Git"
+  runtime: "Rust(cargo, 설치 때 빌드), Git"
   version: "2.0.0"
 ---
 
@@ -43,7 +43,7 @@ metadata:
 
 ## 명령
 
-`python3 -B <이 스킬의 경로>/scripts/pm.py [--campaigns <폴더>] [--executor <실행자>] <명령>`
+`<이 스킬의 경로>/target/release/pm [--campaigns <폴더>] [--executor <실행자>] <명령>`
 
 프로젝트 루트에서 부른다. 프로젝트 루트는 스킬 폴더가 `<루트>/.claude/skills/`, `<루트>/.agents/skills/`, `<루트>/skills/` 중 하나에 있으면 그 `<루트>`이고, 그 밖이면 현재 폴더다(환경 변수 `PM_PROJECT_ROOT`가 우선한다). `--campaigns`의 기본값은 루트의 `campaigns/`다(환경 변수 `PM_CAMPAIGNS_DIR`). `--executor`에는 실제 실행자(하네스, 모델)를 적는다(환경 변수 `PM_EXECUTOR`). 출력은 JSON이다. 종료 코드는 성공 0, 검사 실패나 거절 1, 사용법 오류나 읽을 수 없는 입력 2다.
 
@@ -77,8 +77,9 @@ metadata:
 ## 설치
 
 1. 스킬 폴더 전체를 `.claude/skills/progress-monitor/`(Claude Code) 또는 `.agents/skills/progress-monitor/`(Codex)에 둔다. 두 하네스를 함께 쓰면 한쪽에 두고 다른 쪽은 디렉터리 심볼릭 링크로 잇는다.
-2. 루트에서 `python3 -B <스킬 폴더>/scripts/pm.py init`으로 만들 것을 보고, `--apply`로 만든다.
-3. `python3 -B <스킬 폴더>/scripts/check_campaign.py`로 틀을 검사한다.
+2. 스킬 폴더 안에서 `cargo build --release --locked`로 실행 파일을 빌드한다. 빌드하지 않으면 명령과 종료 훅이 실패한다.
+3. 루트에서 `<스킬 폴더>/target/release/pm init`으로 만들 것을 보고, `--apply`로 만든다.
+4. `<스킬 폴더>/target/release/check_campaign`으로 틀을 검사한다.
 
 ## 참조 문서
 
@@ -96,4 +97,4 @@ metadata:
 - 실행기와 lint는 신뢰 경계가 아니다. 파일의 소유자가 손으로 고쳐 상태를 꾸미는 것을 막지 못한다.
 - 덮음 선언이 옳은지(넓은 검사가 정말 좁은 검사를 포함하는지)는 선언한 사람의 책임이다.
 - 종료 훅은 메인 에이전트가 턴을 끝낼 때만 불린다. 세션이 죽었을 때 깨우는 장치는 없다.
-- 내부 회귀 테스트: `python3 -B -m unittest discover -s <이 스킬의 경로>/tests -v`.
+- 내부 회귀 테스트: 스킬 폴더 안에서 `cargo test --locked`.

@@ -1,6 +1,6 @@
 {
   "_howto": [
-    "합성 예제 캠페인이다. scripts/smoke_install.py가 빈 임시 프로젝트에 설치해 끝까지 돌린다.",
+    "합성 예제 캠페인이다. target/release/smoke_install이 빈 임시 프로젝트에 설치해 끝까지 돌린다.",
     "target.root는 campaigns/ 폴더의 부모(프로젝트 루트) 기준의 demo-target이다."
   ],
   "schema_version": 2,

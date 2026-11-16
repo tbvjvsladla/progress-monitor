@@ -184,8 +184,7 @@ impl Campaign {
         )
     }
 
-    /// A budget: the declared int (any size, bool excluded), else the default.
-    /// The budget's value as declared when it is an int (not a bool), else the default.
+    /// The budget's value as declared when it is an int (any size, not a bool), else the default.
     pub fn budget_value(&self, name: &str) -> Value {
         let fallback = DEFAULT_BUDGETS
             .iter()
@@ -200,6 +199,8 @@ impl Campaign {
         }
     }
 
+    /// The budget as a number for comparisons and counts; use `budget_value` where the
+    /// declared JSON value itself matters (an int beyond i128, a `timedelta` argument).
     pub fn budget(&self, name: &str) -> Num {
         Num::of(&self.budget_value(name)).unwrap_or(Num::Int(0))
     }

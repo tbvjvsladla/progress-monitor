@@ -2,6 +2,37 @@
 
 이 파일은 `logic-py` 브랜치(기준선 `ce04d79`, 태그 `v1.0.0`)의 Python 판을 `logic-rust` 브랜치의 Rust 판으로 옮긴 기록이다. Python 판은 `logic-py` 브랜치에 그대로 있다. cell마다 절을 하나씩 둔다.
 
+이 저장소에서 Python을 언급하는 파일은 이 파일 하나다. 다른 문서는 이전 판을 이 파일과 `logic-py` 브랜치로 가리킨다.
+
+## 전체 대응 요약
+
+| 원본(`logic-py`) | Rust(`logic-rust`) | 절 |
+|---|---|---|
+| `scripts/pm.py` | `src/` 공통 모듈(`lib.rs`, `campaign.rs`, `commands.rs`, `status.rs`, `hook.rs`, `checks.rs`, `init.rs`, `time.rs` 등) + `src/bin/pm.rs` | c10-pm |
+| `scripts/check_campaign.py` | `src/lint/` + `src/bin/check_campaign.rs` | c11-lint |
+| `tests/test_pm.py` (50건) | `tests/{transitions,final_run,hook,rules}.rs` + `tests/common/` | c12-tests |
+| `scripts/sanitize_check.py` | `src/sanitize.rs` + `src/bin/sanitize_check.rs` | c20-pkg |
+| `scripts/package_manifest.py` | `src/manifest.rs` + `src/bin/package_manifest.rs` | c20-pkg |
+| `scripts/smoke_install.py` | `src/install.rs` + `src/bin/smoke_install.rs` | c20-pkg |
+| `tests/test_package.py` (12건) | `tests/package.rs` | c20-pkg |
+| `python3 -B <스킬>/scripts/<도구>.py` | `<스킬>/target/release/<도구>` (설치 때 `cargo build --release --locked`) | c21-docs |
+| `python3 -B -m unittest discover -s tests -v` | `cargo test --locked` | c21-docs |
+
+## 의도한 변경 (닫힌 목록 1~8)
+
+이 밖의 기준선과의 차이는 결함이다. 정본은 수행계획의 "보존 계약" 절이다.
+
+1. 실행 명령: `python3 -B <스킬>/scripts/pm.py` → `<스킬>/target/release/pm`. 출력·지시문·훅 조각의 명령은 실제 실행 파일 경로(프로젝트 루트 기준 상대, 루트 밖이면 절대). `-B` 안내는 없어진다.
+2. 스킬 폴더 판정: 실행 파일 위치(심볼릭 링크를 푼 `current_exe`의 세 단계 위). 프로젝트 루트 규칙은 같다.
+3. 런타임 표기: `Python 3.9+ 표준 라이브러리, Git` → `Rust(cargo, 설치 때 빌드), Git`. 버전 1.0.0 → 2.0.0.
+4. 시험 실행: `python3 -m unittest` → `cargo test`.
+5. MANIFEST 목록이 바뀐 파일 구성을 따른다.
+6. 빌드 산출물 `target/`을 sanitize·manifest·설치 복사에서 뺀다. 설치 계약: 복사 뒤 스킬 폴더에서 `cargo build --release --locked`. 빌드하지 않은 설치에서는 Stop 훅이 127로 실패한다.
+7. 런타임 고유 문구: argparse의 usage·stderr 문구, 약어 허용은 보존하지 않는다. 종료 코드, 키, `ok:false`·`refused` 값은 보존한다. 오류 값의 예외 문구는 바뀔 수 있다.
+8. 기준선 런타임 한계와 비정상 입력(사용자 수용): 깊은 JSON의 `RecursionError`, 문자열이 아닌 이름의 `str()` 비교, i128 밖 정수의 float 산술, 비 UTF-8 인자·환경 변수·cwd, 로그 대체 문자 개수, init OS 오류의 stderr 문구.
+
+지원 환경: Linux(aarch64)에서 검사했다. macOS는 검사하지 않았다.
+
 ## c10-pm — `scripts/pm.py` → `src/` + `src/bin/pm.rs`
 
 ### 원본 → Rust 대응
@@ -50,7 +81,7 @@ prepare 계획(`commands/` 하위 폴더, `consts.rs`, `gates.rs`)보다 파일 
 - r1-K3: `proc::capture_bytes`의 시간 제한이 자식 종료와 두 파이프 EOF를 함께 덮는다(`communicate(timeout)`). 초과면 자식만 죽이고 거둔다. git 시간 초과 문구는 `Command '[...]' timed out after 120 seconds`, 실행 실패는 `[Errno N] ...: 'git'`.
 - r1-K4: `env_probe`와 `git` 출력은 엄격한 UTF-8(stdout 먼저, stderr도)로 푼다. 실패는 기준선과 같은 `UnicodeDecodeError: 'utf-8' codec can't decode ...` 문구로 `ok:false`, exit 2.
 - r1-K5: `init`에서 `Usage` 밖의 오류(OS 오류)는 stdout 없이 stderr의 traceback 끝줄과 exit 1.
-- r1-K6: `timedelta(minutes=phase_minutes)`를 i128로 계산하고 기준선의 두 `OverflowError`(`days=N; must have magnitude <= 999999999`, 기준선 문구 `Python int too large to convert to C int`, Rust는 런타임 이름을 뺀 문구)를 같은 경계에서 낸다. `briefing.every_hours`의 float 환산(반올림 half-even)과 `inf`의 오류도 같은 함수(`time::timedelta_us`)를 쓴다.
+- r1-K6: `timedelta(minutes=phase_minutes)`를 i128로 계산하고 기준선의 두 `OverflowError`(`days=N; must have magnitude <= 999999999`, 기준선 문구 `Python int too large to convert to C int`, Rust는 런타임 이름을 뺀 문구)를 같은 경계에서 낸다. `briefing.every_hours`의 float 환산(반올림 half-even)과 `inf`의 오류도 같은 진입점(`time::timedelta_of`, 안에서 `timedelta_us`)을 쓴다.
 - r1-K7: `parse_time`이 CPython 3.12 C 구현을 그대로 따른다(ISO 주 날짜, `05.+00:00`, 오프셋 앞 공백, 오프셋 소수 초와 `+00:00:00.5` → UTC, `YYYY-Www-HH` 모호성, 아무 구분자 1글자).
 - r1-K10: `PM_LOCK_WAIT_S`와 `--briefing-every-hours`를 `py::py_float`(Python `float(str)`: 유니코드 숫자·공백, 숫자 사이 밑줄, `inf`/`infinity`/`nan` 대소문자)로 읽는다.
 - r1-B2: `Paths::exe` 주석을 실행 파일 경로로 고쳤다.
@@ -75,7 +106,7 @@ prepare 계획(`commands/` 하위 폴더, `consts.rs`, `gates.rs`)보다 파일 
 - 비교: `Num::compare`는 int와 float를 정확히 비교한다(`9007199254740993 > 9007199254740992.0`). NaN이 끼면 `ge`·`gt`가 거짓이다(기준선의 `>=`·`>`). 그래서 `retries`가 NaN이면 `phase retry`를 거절하지 않는다. 이전의 `num_cmp(..).unwrap_or(Equal)`는 NaN을 같음으로 봤다.
 - `review_round`: 기준선처럼 `max([int(review_base or 0)] + int·bool 회차)`의 값 자체를 돌려준다(첫 최대값, `round` 없는 review 이벤트는 0). `int()`는 `py::py_int`(float 절삭, NaN·무한대 오류, 문자열은 Unicode 숫자·공백·`_`·부호와 4300자리 한도, 오류 문구는 기준선). `cell add`의 `review_base`는 그 값이 참일 때 그대로 쓴다. `round_cap`은 bool이 아닌 int이고 `>= 1`인지 `Num`으로 본다.
 - `max`·`sorted`: 영수증 번호는 `py::py_max`(기준선 `max([n ...] + [0]) + 1`, `0.0`·NaN 순서 그대로), 영수증 정렬은 `py::py_sort`(회차 4에서 크기와 상관없이 기준선 `list.sort` 전체를 따르게 바꿈, 아래 절).
-- 시간 제한·마감(r2-1, r2-2): `proc::deadline_after`가 기준선 `monotonic() + t`의 행동을 따른다. NaN·무한대·`Instant`를 넘는 값은 마감 없음, 0 이하는 즉시(먼저 한 번 확인한 뒤). 검사 실행(`timeout_s`, `check_timeout_s`)과 잠금(`PM_LOCK_WAIT_S`)이 같이 쓴다. `phase_minutes`·`briefing.every_hours`는 기존 `time::timedelta_us`(기준선 `timedelta` 오류 포함)로 받고, 그 오류 문구는 런타임 이름을 뺀 `OverflowError: int too large to convert to C int`다(의도한 변경 7, 회차 4에서 문자열 조립을 걷어냄).
+- 시간 제한·마감(r2-1, r2-2): `proc::deadline_after`가 기준선 `monotonic() + t`의 행동을 따른다. NaN·무한대·`Instant`를 넘는 값은 마감 없음, 0 이하는 즉시(먼저 한 번 확인한 뒤). 검사 실행(`timeout_s`, `check_timeout_s`)과 잠금(`PM_LOCK_WAIT_S`)이 같이 쓴다. `phase_minutes`·`briefing.every_hours`는 `time::timedelta_of`(기준선 `timedelta` 오류 포함)로 받고, 그 오류 문구는 런타임 이름을 뺀 `OverflowError: int too large to convert to C int`다(의도한 변경 7, 회차 4에서 문자열 조립을 걷어냄).
 - float 출력(r2-6): `Value::from(f64)`를 쓰지 않는다(비유한 값이 `null`이 된다). `metrics`의 `seconds`·비율·`check_seconds`, gate·final 이벤트와 영수증의 `seconds`는 `py::float_value`로 쓴다(`Infinity`·`NaN` 포함). `metrics`의 `float()`는 1e308을 넘는 int에서 `OverflowError: int too large to convert to float`, 목록·객체에서 기준선 `TypeError` 문구다.
 - `float(str)`(r2-8): 127 미만 문자는 그대로 두고(그래서 `\x1c`–`\x1f`는 공백이 아니다) 앞뒤의 ASCII 공백만 벗긴다. 127 이상은 공백이면 `' '`, 십진 숫자면 숫자, 그 밖은 실패다(`--briefing-every-hours`, `PM_LOCK_WAIT_S`, `metrics`의 문자열 `seconds`).
 - `{:g}`(잠금 실패 문구): `py::g_format`이 유효숫자 6자리·지수 규칙(`-1e+20`, `-1.23457e+06`, `1e-07`, `nan`, `inf`)을 따른다. `repr`/`str`의 비유한 float는 `nan`·`inf`·`-inf`다(`py::float_str`, 로그 이름 같은 `str()` 자리).
@@ -391,3 +422,24 @@ attempt 2(c10 회차 1·2, c11 회차 1 반영 뒤 트리) 자기 확인:
 - sanitize 전수 대조: 위 매처 절.
 
 판정: **COMPLETE** (`sanitize_check`, `package_manifest`, `smoke_install`, `tests/test_package.py` 12건). sanitize는 기준선 패턴 문자열 그대로이고, 남은 차이는 유니코드 판 차이뿐이다. `.py` 삭제·문서 나머지·MANIFEST 최종 재생성은 c21의 몫이다.
+
+## c21-docs — Python 제거와 문서·설정 정리
+
+### 바꾼 것
+
+- 명령 표기: `SKILL.md`(runtime `Rust(cargo, 설치 때 빌드), Git`, 명령, 설치에 빌드 단계, 시험 `cargo test --locked`), `README.md`(배지 `logic-rust`·Rust(cargo)·Git, 준비물·지원 환경 Linux 검사함·macOS 미검사, 이전 판 안내, `VERSION="v2.0.0"`과 설치 블록의 빌드·`package_manifest --check`, 설치 계약, 여정 2 명령, 명령 요약, 폴더 구성, 배포자 명령, 금지 패턴 위치 `src/sanitize.rs`의 `baseline_patterns`), `references/hooks.md`(훅 명령 두 개, 빌드하지 않으면 훅이 127로 실패하는 설치 계약), `references/monitor.md`(지시문 틀 두 곳의 명령, `-B` 문장 삭제), `assets/campaigns/README.md`, `assets/campaigns/_template/campaign.json`, `assets/examples/demo-campaign/campaign.json`.
+- `.gitattributes`: `*.rs`, `*.toml`, `Cargo.lock`을 `text eol=lf`로. `.gitignore`: 파이썬 산출물 두 줄을 뺐다.
+- `src/campaign.rs`: `budget_value` 위에 겹친 rustdoc을 한 줄로, `budget`에 사용 계약 한 줄(c10 회차 4 비차단 지적). 이 파일 c10 절의 `timedelta_us` 언급을 진입점 `timedelta_of`로 바로잡았다.
+- 훅 조각은 release `pm init` dry-run 출력과 글자 단위로 대조했다(Claude `"${CLAUDE_PROJECT_DIR}/.claude/skills/progress-monitor/target/release/pm" stop-hook --harness claude`, Codex는 `src/init.rs`의 같은 형식).
+
+### 남은 것
+
+- 원본 `.py` 7파일(`scripts/` 다섯, `tests/test_pm.py`, `tests/test_package.py`)의 `git rm`과 그 뒤 `PACKAGE_MANIFEST.json` 재생성. 수행 세션의 권한 판정이 삭제를 막아 사람의 확인을 기다린다.
+
+### 검사
+
+- release 빌드, `cargo fmt --check` 통과. `check_campaign` 틀 검사 findings 없음, `smoke_install` `SMOKE-PASS`, `sanitize_check` `SANITIZE OK (0 hits)`.
+- `cargo test --locked`: MANIFEST 재생성 전에는 `manifest_matches_tree`만 실패, 재생성 뒤 다시 본다.
+- no-python: `.py` 7파일과 MANIFEST의 그 항목 7줄 밖에는 걸리는 줄이 없다.
+
+판정: **INCOMPLETE** (`.py` 삭제와 최종 MANIFEST 재생성 대기).

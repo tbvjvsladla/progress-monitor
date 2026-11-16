@@ -1,6 +1,4 @@
 # 실행 부산물과 로컬 환경
-__pycache__/
-*.pyc
 .cache/
 .env
 .env.*
