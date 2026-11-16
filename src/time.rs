@@ -400,9 +400,9 @@ fn parse_iso(text: &str) -> Option<Option<Moment>> {
     }))
 }
 
-/// The baseline's `OverflowError` for a day count beyond a C int (the interpreter's
-/// name is spelled with an escape so the source names no interpreter).
-const INT_TOO_LARGE: &str = "OverflowError: Pyth\u{6f}n int too large to convert to C int";
+/// The `OverflowError` for a day count beyond a C int. The wording is the
+/// baseline's without the runtime's name (intended change 7: error text).
+const INT_TOO_LARGE: &str = "OverflowError: int too large to convert to C int";
 
 /// `timedelta(<unit>=amount)` in microseconds, `unit_us` microseconds per unit,
 /// with the constructor's errors: a non-finite float, more days than a C int

@@ -14,6 +14,57 @@ use crate::jsonio;
 use crate::py::{is_digits, obj, py_repr, py_str, Obj};
 use crate::{SCHEMA, SUFFIX, TOOL};
 
+/// The baseline's `tempfile.gettempdir()`: the first of `TMPDIR`, `TEMP`, `TMP`,
+/// `/tmp`, `/var/tmp`, `/usr/tmp` and the working folder where a new file can be
+/// created and written.
+fn temp_base() -> LintResult<PathBuf> {
+    let cwd = std::env::current_dir().map_err(|e| LintError::io(Path::new("."), &e))?;
+    let mut candidates: Vec<PathBuf> = ["TMPDIR", "TEMP", "TMP"]
+        .iter()
+        .filter_map(|name| std::env::var_os(name).filter(|v| !v.is_empty()))
+        .map(|dir| cwd.join(dir))
+        .collect();
+    candidates.extend(["/tmp", "/var/tmp", "/usr/tmp"].map(PathBuf::from));
+    candidates.push(cwd);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    for dir in &candidates {
+        for attempt in 0..100u32 {
+            let probe = dir.join(format!(
+                "pm-lint-probe-{}-{nanos}-{attempt}",
+                std::process::id()
+            ));
+            let opened = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(&probe);
+            match opened {
+                Ok(mut file) => {
+                    let written = std::io::Write::write_all(&mut file, b"blat");
+                    drop(file);
+                    let _ = fs::remove_file(&probe);
+                    if written.is_ok() {
+                        return Ok(dir.clone());
+                    }
+                    break;
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(_) => break,
+            }
+        }
+    }
+    let listed: Vec<String> = candidates
+        .iter()
+        .map(|d| format!("'{}'", d.display()))
+        .collect();
+    Err(LintError::Internal(format!(
+        "FileNotFoundError: [Errno 2] No usable temporary directory found in [{}]",
+        listed.join(", ")
+    )))
+}
+
 /// A folder under the system temporary folder, removed when dropped.
 pub struct ScratchDir {
     path: PathBuf,
@@ -21,7 +72,7 @@ pub struct ScratchDir {
 
 impl ScratchDir {
     pub fn new() -> LintResult<ScratchDir> {
-        let base = std::env::temp_dir();
+        let base = temp_base()?;
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos());
@@ -58,7 +109,7 @@ fn io<T>(path: &Path, result: std::io::Result<T>) -> LintResult<T> {
 fn copy_tree(from: &Path, to: &Path) -> LintResult<()> {
     io(to, fs::create_dir_all(to))?;
     for entry in sorted_entries(from)? {
-        let dest = to.join(file_name(&entry));
+        let dest = to.join(entry.file_name().unwrap_or_default());
         if is_dir(&entry) {
             copy_tree(&entry, &dest)?;
         } else {

@@ -96,9 +96,9 @@ prepare 계획(`commands/` 하위 폴더, `consts.rs`, `gates.rs`)보다 파일 
 | `Unreadable`, 처리하지 않은 예외 | `lint::LintError::{Unreadable, Internal}` (exit 2 + JSON / exit 1 + stderr 한 줄) |
 | `blank`, `load_json` | `lint::blank`, `lint::load_json`(+ `read_text`, `read_utf8`) |
 | `read_declaration` | `src/lint/declaration.rs` |
-| `check_phase_file` … `check_gates`, `read_events`, `json_values`, `check` | `src/lint/rules.rs`(같은 이름, `json_values` → `holds_placeholder`, `add` → `Findings::add`). 공개 진입점 `progress_monitor::lint::check` |
-| `Path.rglob("*")` + `sorted`, `iterdir`/`glob` + `sorted` | `lint::files_below`(구성요소 순 정렬, 숨김 포함, 디렉터리 링크 안으로 들어가지 않음), `lint::sorted_entries` |
-| `write_json`, `edit_json`, `build_valid_instance`, `control_cases`, `instance_states`, `instance_contents`, `negative_control`, `tempfile.TemporaryDirectory`, `shutil.copytree` | `src/lint/control.rs`(`Case{name, rule, seed}` 목록, `ScratchDir`(Drop에서 삭제), `copy_tree`) |
+| `check_phase_file` … `check_gates`, `read_events`, `json_values`, `check` | `src/lint/rules.rs`(같은 이름, `json_values` → `holds_placeholder`(반복문, 기준선의 재귀 한도 보존), `add` → `Findings::add`). 공개 진입점 `progress_monitor::lint::check` |
+| `Path.rglob("*")` + `sorted`, `iterdir`/`glob` + `sorted`, `surrogateescape` 이름 | `lint::files_below`, `py_text`/`os_name`/`join_text`/`py_order`(구성요소 순 정렬, 숨김 포함, 디렉터리 링크 안으로 들어가지 않음), `lint::sorted_entries` |
+| `write_json`, `edit_json`, `build_valid_instance`, `control_cases`, `instance_states`, `instance_contents`, `negative_control`, `tempfile.TemporaryDirectory`, `shutil.copytree` | `src/lint/control.rs`(`Case{name, rule, seed}` 목록, `ScratchDir`(Drop에서 삭제, `temp_base` = `gettempdir`), `copy_tree`) |
 | `argparse` + `main` | `src/lint/cli.rs`(`parse`, `main`, `HELP`), 진입점 `src/bin/check_campaign.rs` |
 | `datetime.fromisoformat` 판정 | `time::parse_time_detail` → `Parsed::{Invalid, Naive, Aware}`(c10 `time.rs`에 더함. `parse_time`은 그 위의 래퍼로 동작 불변) |
 
@@ -117,24 +117,37 @@ prepare 계획대로 `src/lint/{mod,declaration,rules,control,cli}.rs`로 나눴
 
 1. 대조 fixture의 가상 검사 명령: `unit` `cargo test --locked`(영수증 `key.cmd` 같음), `unit-fast` `cargo test --locked fast`, `style` `tools/style.sh`(check-duplicate-command case 같음), check-duplicate-id `tools/other.sh`, phase `proof.check` `sh verify.sh`. 외부 출력에는 찍히지 않는다(`--list-control` 출력 바이트가 기준선과 같다).
 2. 스킬 폴더: `Paths::discover`(c10).
-7. CLI 문구: `--help` 본문은 새로 썼다(규칙 목록·모드·종료 코드 설명 유지, "pm program beside this one"). 사용법 오류는 stderr + exit 2, 약어 받지 않음. JSON `error`의 `not JSON (...)` 괄호 안은 serde 문구. 처리하지 않은 예외는 traceback 대신 stderr 한 줄(`check_campaign: error: ...`), exit 1은 같다.
+7. CLI 문구: `--help` 본문은 새로 썼다(규칙 목록·모드·종료 코드 설명 유지, "pm program beside this one"). 사용법 오류는 stderr + exit 2, 약어 받지 않음. JSON `error`의 `not JSON (...)` 괄호 안은 c10 `jsonio`의 문구(대조 98건에서 기준선과 같다). `time.rs`의 C int 넘침 문구에서 런타임 이름을 뺐다. 처리하지 않은 예외는 traceback 대신 stderr 한 줄(`check_campaign: error: ...`), exit 1은 같다.
 
-### 알려진 차이(지원 범위 밖)
+### 회차 1 검토 반영(`temp/pm-rust-261116/review/c11-r1.json`)
 
-- c10과 같은 JSON 범위 차이(`NaN`/`Infinity`, u64 밖 정수, 고립 서로게이트, 128단계 넘는 중첩): 선언·상태 파일은 `not JSON`(exit 2), journey 줄은 "line is not JSON", 자리표시 검사의 `.json`은 JSON 아님으로 본다.
-- journey 시각은 c10 `parse_time`의 `fromisoformat` 부분집합으로 읽는다. 주 단위 날짜 등 바깥 형식은 판정이 갈릴 수 있다.
-- UTF-8이 아닌 파일 이름은 손실 변환한 이름으로 비교·출력한다.
-- 사용 가능한 임시 폴더를 고르는 규칙: `TMPDIR`(없으면 `/tmp`)만 쓴다(기준선 `tempfile`은 쓸 수 없으면 다른 후보로 넘어간다).
+- r1-K2: lint는 c10의 완전 보존 파서 `jsonio::parse`만 쓴다(`lint::load_json`, journey 줄, 자리표시 검사의 `.json`). 선언·상태 파일의 `NaN`/`Infinity`, u64 밖 정수, 고립 서로게이트 이스케이프, 깊은 중첩이 기준선과 같은 판정을 낸다. 기준선은 `JSONDecodeError`만 잡았으므로 디코더의 다른 예외(9997단 중첩의 `RecursionError`, 4300자리 넘는 정수의 `ValueError`)는 선언·상태·journey·`.json` 어디서든 stdout 없이 exit 1로 끝난다(`lint::parse_json`, `load_json`). 시험 `lint::rules::tests::non_finite_numbers_in_a_declaration_pass_like_the_baseline`(PASS, findings 없음).
+- r1-K7: journey 규칙은 c10의 `time::parse_time_detail`(`fromisoformat` 이식)로 판정한다. 시험 `journey_times_the_baseline_accepts`(`2027-01-01T00:00:05 +00:00`, 주 단위 날짜, 쉼표 소수, 7자리 소수, 초 단위 오프셋 등 11개)와 `journey_times_the_baseline_rejects`(시간대 없음, `24:00`, `+25:00`, 2월 29일, 앞 공백, 소문자 `z`, 전각 숫자, 되돌아가는 시각 9개, 메시지까지).
+- r1-B1: 아래 "범위 밖으로 적었던 차이"를 모두 기준선과 같게 고쳤다. 의도한 변경 1·2·7 밖의 알려진 차이는 없다.
+  - 자리표시 검사의 `json_values` 재귀 한도: 기준선은 파싱한 값의 수준 995(뿌리 0)에 닿으면 `RecursionError`로 죽는다(stdout 없음, exit 1). `holds_placeholder`가 같은 수준에서 같은 오류를 낸다. 순회는 반복문(문서 순서, 첫 적중에서 멈춤)이라 Rust 스택에 기대지 않는다. 시험 `deep_placeholder_walk_ends_like_the_baseline`.
+  - UTF-8이 아닌 파일 이름·인자: 기준선의 `surrogateescape`처럼 읽을 수 없는 바이트를 U+DC80..U+DCFF 고립 서로게이트(c10 `jsonio`의 대리 문자)로 읽고(`lint::py_text`), 경로로 쓸 때 원래 바이트로 되돌린다(`lint::os_name`, `os_path`, `join_text`; 선언의 `\udcXX` 이스케이프 이름도 같은 바이트의 파일을 가리킨다). 정렬은 서로게이트 코드 포인트 순(`py_order`). 그런 이름이 출력에 들어가면 기준선처럼 쓰지 못하고 끝난다(`UnicodeEncodeError`, stdout 없음, exit 1, 같은 위치 번호). 시험 `undecodable_name_bytes_round_trip_as_escapes`.
+  - 임시 폴더: 기준선 `tempfile.gettempdir()`처럼 `TMPDIR`, `TEMP`, `TMP`, `/tmp`, `/var/tmp`, `/usr/tmp`, 작업 폴더 순으로 새 파일을 만들고 쓸 수 있는 첫 폴더를 쓴다(`control::temp_base`). 없으면 `FileNotFoundError: ... No usable temporary directory found in [...]`, exit 1.
+- 오케스트레이터 지시(공용 `src/time.rs`): `timedelta_us`의 C int 넘침 오류 문구를 이스케이프로 조립하던 것을 런타임 이름 없는 `OverflowError: int too large to convert to C int`로 바꿨다. 오류 문구이므로 의도한 변경 7이다. 소스에서 검사를 피하려는 이스케이프·문자열 조립을 쓰지 않는다. c10 절 r1-K6의 문구 인용은 기준선 쪽 문구다.
+
+### 알려진 차이
+
+없음(의도한 변경 1·2·7만). `PM_PROJECT_ROOT`의 값이 UTF-8이 아닐 때는 c10 `paths::project_root`의 처리를 따른다.
 
 ### 검사
 
-- `cargo build --locked`, `cargo build --release --locked`: 통과.
-- `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`: 통과(자기 확인).
-- `cargo test --locked`: 단위 시험 12건 통과(이 cell 몫: 접미 규칙, blank, 구성요소 순 정렬, 인자 파서, `parse_time_detail`).
-- 기준선 대조 `temp/pm-rust-261116/c11-lint-cmp/compare.sh target/release/check_campaign`(같은 cwd·`PM_PROJECT_ROOT`, 스킬 경로만 가림): 98건 중 96건 stdout 바이트·종료 코드 같음. 다른 2건은 `not JSON (...)` 괄호 문구(의도한 변경 7). 대상: `--list-control`, 기본 템플릿, `--template` 강제, demo-campaign(`--root` 유무), 없는 경로·파일·빈 경로, 호스트 프로젝트의 실제 인스턴스 3개와 템플릿, 대조 case 33개 사본, 순회(숨김·링크·정렬·`.json` 규칙·바이너리), journey 형식, cell.md 형태, phase·pointer·gate·선언 형태 40여 개, structure·auto-cap, exit 1 입력 6개, `PM_PROJECT_ROOT`.
-- 오라클(`PM_BIN=target/release/pm PM_LINT_BIN=target/release/check_campaign`): `Ran 50 tests ... OK`.
+툴체인: rustc 1.100.0 (0ef1bc386 2026-11-09), cargo 같은 판, Python 3.12.3(기준선 대조에만), x86_64 Linux. 원시 근거: 대조 도구 `temp/pm-rust-261116/c11-lint-cmp/{make_cases.py,compare.sh}`, 추가 대조 사례는 이 cell 수행 세션의 임시 폴더에서 같은 방식(기준선과 Rust를 같은 입력·같은 cwd로 돌려 stdout 바이트와 종료 코드 비교)으로 돌렸다.
 
-판정: **COMPLETE** (`scripts/check_campaign.py`의 모든 규칙·자체검사·CLI). `tests/*.rs` 이식(c12), 패키지 도구(c20), `.py` 삭제·문서(c21)는 다른 cell의 몫이다.
+| 검사 | 명령 | 종료 코드 | 판정 |
+|---|---|---|---|
+| 빌드 | `cargo build --locked`, `cargo build --release --locked` | 0 | 통과 |
+| 형식 | `cargo fmt --check` | 0 | 통과(자기 확인) |
+| clippy | `cargo clippy --all-targets --locked -- -D warnings` | 0 | 통과(자기 확인) |
+| 단위 시험 | `cargo test --locked --lib` | 0 | 26건 통과(이 cell 몫: 접미 규칙, blank, 구성요소 순 정렬, 이름 이스케이프 왕복, 인자 파서, 깊은 자리표시 순회, NaN 선언, journey 시각 수용·거절) |
+| 기준선 대조 | `sh temp/pm-rust-261116/c11-lint-cmp/compare.sh $PWD/target/release/check_campaign` | 0 | same=98 diff=0 |
+| 추가 대조 | NaN·Infinity·큰 정수·서로게이트·깊은 중첩(선언·상태·journey·`.json`, 9996/9997/12000단, 5000자리 정수), journey 시각 33개, 자리표시 순회 수준 993~3000, UTF-8 아닌 파일·폴더·phase 파일·인자·선언 이름·pointer, `TMPDIR` 4가지 | 각 경우 기준선과 같음 | 전부 같음 |
+| 오라클 | `PM_BIN=target/release/pm PM_LINT_BIN=target/release/check_campaign python3 -B -m unittest discover -s temp/pm-rust-261116/oracle` | 0 | `Ran 50 tests ... OK` |
+
+판정: **COMPLETE** (`scripts/check_campaign.py`의 모든 규칙·자체검사·CLI, 회차 1 차단 지적 K2·K7·B1 반영). `tests/*.rs` 이식(c12), 패키지 도구(c20), `.py` 삭제·문서(c21)는 다른 cell의 몫이다.
 
 ## c12-tests — `tests/test_pm.py` → `tests/*.rs`
 

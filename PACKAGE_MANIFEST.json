@@ -43,9 +43,9 @@
     },
     {
       "path": "PORTING.md",
-      "bytes": 35600,
+      "bytes": 38977,
       "mode": "0644",
-      "sha256": "f66f51d8496d24661d025dbd2351100fb96893a5daf3c05eac668d792add0234"
+      "sha256": "2003199c90b36c58f62797814be274da2573021c78d7652b9e69c414a7728e3f"
     },
     {
       "path": "README.md",
@@ -247,9 +247,9 @@
     },
     {
       "path": "src/bin/check_campaign.rs",
-      "bytes": 293,
+      "bytes": 296,
       "mode": "0644",
-      "sha256": "dabf55a7642de132e74270978e55e7cfe40fc7cd1975ce1fbad66f83887baca4"
+      "sha256": "ab51e0ffdf4e56db3e52611530663e3b41809c85a777d6efd5048aeedee8fbfc"
     },
     {
       "path": "src/bin/package_manifest.rs",
@@ -337,15 +337,15 @@
     },
     {
       "path": "src/lint/cli.rs",
-      "bytes": 12712,
+      "bytes": 13256,
       "mode": "0644",
-      "sha256": "f62aebb8c79b0b4119831e0c2469ff416c232ac51da840fdf5f7278e9c061bd1"
+      "sha256": "36222df7d3aa3e32f84c022ef0b2b42c20108799ea7b81e78c9aa0803b83e9a8"
     },
     {
       "path": "src/lint/control.rs",
-      "bytes": 30366,
+      "bytes": 32336,
       "mode": "0644",
-      "sha256": "e6a97f8d276c6fd1b8cb7d82655c6c5cd31c7b72680df281ce4e88d44d86f9c0"
+      "sha256": "b5cb32e464e8a180fe5151cc7c5d7f6aa1c93a4f213c0c9518609f2527dc61f8"
     },
     {
       "path": "src/lint/declaration.rs",
@@ -355,15 +355,15 @@
     },
     {
       "path": "src/lint/mod.rs",
-      "bytes": 8341,
+      "bytes": 11886,
       "mode": "0644",
-      "sha256": "e1f4af629466dec3bc518c856392c6be0bb621a2f9a29e6fc0e064db0f4ad969"
+      "sha256": "da93dbd74c2d3130d3c9f257cfe2da263a3c51bb9c029802f9e3162656b7ca16"
     },
     {
       "path": "src/lint/rules.rs",
-      "bytes": 30903,
+      "bytes": 37227,
       "mode": "0644",
-      "sha256": "26ffdf1f464e035b5f3408243966e1d251dc34e8c93eb78dc5aef8a6b61de9aa"
+      "sha256": "919675172c4f86c0b807f4292693f22ff6514444db6b105ed91962fada99cf40"
     },
     {
       "path": "src/lock.rs",
@@ -409,9 +409,9 @@
     },
     {
       "path": "src/time.rs",
-      "bytes": 18509,
+      "bytes": 18490,
       "mode": "0644",
-      "sha256": "47b0d8e4d30f677e956a8d162ca1c6243796cd6cda27325e6731257766cddd05"
+      "sha256": "ffb2c7af6c42253ebd0ca7725eb67869ee09af0d987591daa365f8595849dd9e"
     },
     {
       "path": "tests/common/mod.rs",

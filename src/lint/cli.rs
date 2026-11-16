@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::control::negative_control;
-use super::{check, findings_value, is_dir, LintError, RULES};
-use crate::jsonio::pretty;
+use super::{check, findings_value, is_dir, os_path, py_text, LintError, RULES};
+use crate::error::PmError;
+use crate::jsonio::{encodable, pretty};
 use crate::paths::{normalise, resolve, Paths};
 use crate::py::obj;
 
@@ -156,10 +157,17 @@ fn parse(argv: &[String]) -> Result<Args, ParseEnd> {
     Ok(args)
 }
 
-fn print(value: Value) {
+/// Print the report; a text holding a name that is not UTF-8 cannot be written,
+/// which ends the command as the baseline's `UnicodeEncodeError` did (exit 1).
+fn print(value: Value) -> Result<(), LintError> {
+    let text = pretty(&value);
+    if let Err(PmError::Internal(why) | PmError::Usage(why)) = encodable(&text) {
+        return Err(LintError::Internal(why));
+    }
     let mut out = std::io::stdout().lock();
-    let _ = writeln!(out, "{}", pretty(&value));
+    let _ = writeln!(out, "{text}");
     let _ = out.flush();
+    Ok(())
 }
 
 fn internal(text: &str) -> i32 {
@@ -205,12 +213,12 @@ pub fn main(argv: &[String]) -> i32 {
         .join("_template");
     let setup = || -> Result<(PathBuf, PathBuf, PathBuf, bool), String> {
         let root = match &args.root {
-            Some(text) => resolve(&normalise(text))?,
+            Some(text) => resolve(&os_path(&normalise(text)))?,
             None => paths.repo.clone(),
         };
         let template_dir = default_template(&paths, &package)?;
         let target = match &args.path {
-            Some(text) => resolve(&normalise(text))?,
+            Some(text) => resolve(&os_path(&normalise(text)))?,
             None => template_dir.clone(),
         };
         let template = args.template || target == template_dir || target == resolve(&package)?;
@@ -223,11 +231,13 @@ pub fn main(argv: &[String]) -> i32 {
     match run(&args, &root, &template_dir, &target, template) {
         Ok(code) => code,
         Err(LintError::Unreadable(text)) => {
-            print(Value::Object(obj([
+            match print(Value::Object(obj([
                 ("status", Value::from("ERROR")),
                 ("error", Value::from(text)),
-            ])));
-            2
+            ]))) {
+                Ok(()) => 2,
+                Err(LintError::Internal(text) | LintError::Unreadable(text)) => internal(&text),
+            }
         }
         Err(LintError::Internal(text)) => internal(&text),
     }
@@ -270,21 +280,21 @@ fn run(
             ("rules", Value::Object(per_rule)),
             ("cases", Value::Object(report.cases)),
             ("problems", Value::from(problems)),
-        ])));
+        ])))?;
         return Ok(if ok { 0 } else { 1 });
     }
     if !problems.is_empty() {
         print(Value::Object(obj([
             ("status", Value::from("FAIL")),
             ("negative_control", Value::from(problems)),
-        ])));
+        ])))?;
         return Ok(1);
     }
     let findings = check(target, root, template)?;
     let shown = match target.strip_prefix(root) {
         Ok(rel) if rel.as_os_str().is_empty() => ".".to_string(),
-        Ok(rel) => rel.to_string_lossy().into_owned(),
-        Err(_) => target.to_string_lossy().into_owned(),
+        Ok(rel) => py_text(rel.as_os_str()),
+        Err(_) => py_text(target.as_os_str()),
     };
     print(Value::Object(obj([
         (
@@ -298,7 +308,7 @@ fn run(
         ),
         ("target", Value::from(shown)),
         ("findings", findings_value(&findings)),
-    ])));
+    ])))?;
     Ok(if findings.is_empty() { 0 } else { 1 })
 }
 

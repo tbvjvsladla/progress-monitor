@@ -6,13 +6,15 @@
 //! reads them.
 
 use std::cmp::Ordering;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::ErrorKind;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use crate::jsonio;
+use crate::jsonio::{self, JsonError};
 use crate::py;
 
 pub mod cli;
@@ -161,7 +163,22 @@ pub fn load_json(path: &Path) -> LintResult<Value> {
     let not_json =
         |reason: String| LintError::Unreadable(format!("{}: not JSON ({reason})", path.display()));
     let text = String::from_utf8(bytes).map_err(|e| not_json(e.to_string()))?;
-    jsonio::parse(&py::universal_newlines(&text)).map_err(|e| not_json(e.to_string()))
+    match jsonio::parse(&py::universal_newlines(&text)) {
+        Ok(value) => Ok(value),
+        Err(JsonError::Decode(reason)) => Err(not_json(reason)),
+        Err(JsonError::Other(text)) => Err(LintError::Internal(text)),
+    }
+}
+
+/// `json.loads` where the baseline caught only `JSONDecodeError`: `None` for one;
+/// any other exception the decoder raised (`RecursionError`, the integer-digit
+/// `ValueError`) ends the command.
+pub fn parse_json(text: &str) -> LintResult<Option<Value>> {
+    match jsonio::parse(text) {
+        Ok(value) => Ok(Some(value)),
+        Err(JsonError::Decode(_)) => Ok(None),
+        Err(JsonError::Other(text)) => Err(LintError::Internal(text)),
+    }
 }
 
 /// A JSON object read from a file (control fixtures only).
@@ -184,10 +201,60 @@ pub fn exists(path: &Path) -> bool {
     fs::metadata(path).is_ok()
 }
 
+/// A file name as the baseline's text: UTF-8 with each undecodable byte held as
+/// the lone surrogate U+DC80..U+DCFF (`surrogateescape`), stored as the
+/// [`jsonio::surrogate_char`] stand-in. Printing such a name fails like the
+/// baseline's `UnicodeEncodeError` (see [`jsonio::encodable`]).
+pub fn py_text(name: &OsStr) -> String {
+    let mut out = String::new();
+    for chunk in name.as_bytes().utf8_chunks() {
+        out.push_str(chunk.valid());
+        for byte in chunk.invalid() {
+            out.push(jsonio::surrogate_char(0xDC00 + u32::from(*byte)));
+        }
+    }
+    out
+}
+
+/// The file name [`py_text`] read: escaped bytes back to themselves.
+pub fn os_name(text: &str) -> OsString {
+    let mut out = Vec::new();
+    for ch in text.chars() {
+        match jsonio::as_surrogate(ch) {
+            Some(code @ 0xDC80..=0xDCFF) => out.push((code - 0xDC00) as u8),
+            _ => out.extend_from_slice(ch.encode_utf8(&mut [0; 4]).as_bytes()),
+        }
+    }
+    OsString::from_vec(out)
+}
+
+/// `path` with each component read back through [`os_name`].
+pub fn os_path(path: &Path) -> PathBuf {
+    PathBuf::from(os_name(&path.to_string_lossy()))
+}
+
+/// [`crate::paths::join`] for a name read from an instance file: the escaped bytes
+/// of [`py_text`] go back to themselves, as the baseline's path objects did.
+pub fn join_text(base: &Path, rel: &str) -> PathBuf {
+    let lexical = os_path(&crate::paths::join(Path::new(""), rel));
+    if lexical.is_absolute() {
+        lexical
+    } else if lexical == Path::new(".") {
+        crate::paths::join(base, "")
+    } else {
+        base.join(lexical)
+    }
+}
+
+/// The last component of `path` as the baseline's text.
 pub fn file_name(path: &Path) -> String {
-    path.file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default()
+    path.file_name().map(py_text).unwrap_or_default()
+}
+
+/// Code point order of the baseline's strings: a stand-in sorts as its surrogate.
+pub fn py_order(a: &str, b: &str) -> Ordering {
+    let key = |ch: char| jsonio::as_surrogate(ch).unwrap_or(ch as u32);
+    a.chars().map(key).cmp(b.chars().map(key))
 }
 
 /// The entries of a folder, sorted by name (code point order).
@@ -196,7 +263,7 @@ pub fn sorted_entries(dir: &Path) -> LintResult<Vec<PathBuf>> {
     for entry in fs::read_dir(dir).map_err(|e| LintError::io(dir, &e))? {
         entries.push(entry.map_err(|e| LintError::io(dir, &e))?.path());
     }
-    entries.sort_by_key(|p| file_name(p));
+    entries.sort_by(|a, b| py_order(&file_name(a), &file_name(b)));
     Ok(entries)
 }
 
@@ -211,7 +278,7 @@ pub fn files_below(root: &Path) -> LintResult<Vec<Vec<String>>> {
             let entry = entry.map_err(|e| LintError::io(&dir, &e))?;
             let path = entry.path();
             let mut rel = parts.clone();
-            rel.push(entry.file_name().to_string_lossy().into_owned());
+            rel.push(py_text(&entry.file_name()));
             let real_dir = entry.file_type().is_ok_and(|t| t.is_dir());
             if real_dir {
                 pending.push((path.clone(), rel.clone()));
@@ -226,7 +293,13 @@ pub fn files_below(root: &Path) -> LintResult<Vec<Vec<String>>> {
 }
 
 fn compare_parts(a: &[String], b: &[String]) -> Ordering {
-    a.cmp(b)
+    for (x, y) in a.iter().zip(b) {
+        match py_order(x, y) {
+            Ordering::Equal => {}
+            other => return other,
+        }
+    }
+    a.len().cmp(&b.len())
 }
 
 /// `Path.suffix`: the last dotted part of a name that does not start or end with it.
@@ -255,6 +328,25 @@ mod tests {
         assert!(blank(Some(&Value::from(" \n"))));
         assert!(blank(Some(&Value::from(3))));
         assert!(!blank(Some(&Value::from("x"))));
+    }
+
+    #[test]
+    fn undecodable_name_bytes_round_trip_as_escapes() {
+        let raw = OsString::from_vec(b"c\xfe-\xc3\xa9\xed\xa0\x80".to_vec());
+        let text = py_text(&raw);
+        let codes: Vec<u32> = text
+            .chars()
+            .map(|c| jsonio::as_surrogate(c).unwrap_or(c as u32))
+            .collect();
+        assert_eq!(codes, [0x63, 0xDCFE, 0x2D, 0xE9, 0xDCED, 0xDCA0, 0xDC80]);
+        assert_eq!(os_name(&text), raw);
+        assert_eq!(py_order(&text, "c\u{e000}"), Ordering::Less);
+        assert_eq!(
+            join_text(Path::new("/r"), "a/./b/"),
+            PathBuf::from("/r/a/b")
+        );
+        assert_eq!(join_text(Path::new("/r"), "/x"), PathBuf::from("/x"));
+        assert_eq!(join_text(Path::new("/r"), ""), PathBuf::from("/r"));
     }
 
     #[test]

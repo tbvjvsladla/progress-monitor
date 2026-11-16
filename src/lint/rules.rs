@@ -6,12 +6,10 @@ use std::path::Path;
 use serde_json::{Map, Value};
 
 use super::{
-    blank, exists, file_name, files_below, is_dir, is_file, load_json, one_of, read_text,
-    read_utf8, sorted_entries, suffix, text_of, Findings, LintError, LintResult,
-    DEFAULT_AUTO_CELLS, PLACEHOLDER, POINTER_KEYS, SKELETON_CELL, STATES,
+    blank, exists, file_name, files_below, is_dir, is_file, join_text as join, load_json, one_of,
+    os_name, parse_json, read_text, read_utf8, sorted_entries, suffix, text_of, Findings,
+    LintError, LintResult, DEFAULT_AUTO_CELLS, PLACEHOLDER, POINTER_KEYS, SKELETON_CELL, STATES,
 };
-use crate::jsonio;
-use crate::paths::join;
 use crate::py::{is_int, number_text, py_eq, py_repr, py_str, repr_str, splitlines, truthy};
 use crate::time::{parse_time_detail, Moment, Parsed};
 use crate::{FINAL, SECTIONS, SUFFIX, TOOL};
@@ -297,7 +295,7 @@ fn check_journey(path: &Path, add: &mut Findings) -> LintResult<()> {
     let mut previous: Option<Moment> = None;
     for (index, line) in splitlines(&text).into_iter().enumerate() {
         let at = format!("{rel}:{}", index + 1);
-        let Ok(event) = jsonio::parse(line) else {
+        let Some(event) = parse_json(line)? else {
             add.add("journey-invalid", at, "line is not JSON");
             continue;
         };
@@ -377,16 +375,33 @@ fn check_pointers(path: &Path, root: &Path, add: &mut Findings) -> LintResult<()
     Ok(())
 }
 
-/// Whether a string value outside `_` keys holds the placeholder.
-fn holds_placeholder(node: &Value) -> bool {
-    match node {
-        Value::Object(map) => map
-            .iter()
-            .any(|(k, v)| !k.starts_with('_') && holds_placeholder(v)),
-        Value::Array(items) => items.iter().any(holds_placeholder),
-        Value::String(s) => s.contains(PLACEHOLDER),
-        _ => false,
+/// Nesting level (the parsed root is level 0) at which the baseline's recursive
+/// placeholder walk ran out of interpreter stack (`RecursionError`, exit 1).
+const PLACEHOLDER_WALK_LEVELS: usize = 995;
+
+/// Whether a string value outside `_` keys holds the placeholder, visiting
+/// values in document order and stopping at the first hit like the baseline.
+fn holds_placeholder(root: &Value, level: usize) -> LintResult<bool> {
+    let mut pending: Vec<(&Value, usize)> = vec![(root, level)];
+    while let Some((node, level)) = pending.pop() {
+        if level >= PLACEHOLDER_WALK_LEVELS {
+            return Err(LintError::Internal(
+                "RecursionError: maximum recursion depth exceeded".into(),
+            ));
+        }
+        match node {
+            Value::Object(map) => pending.extend(
+                map.iter()
+                    .rev()
+                    .filter(|(key, _)| !key.starts_with('_'))
+                    .map(|(_, value)| (value, level + 1)),
+            ),
+            Value::Array(items) => pending.extend(items.iter().rev().map(|v| (v, level + 1))),
+            Value::String(s) if s.contains(PLACEHOLDER) => return Ok(true),
+            _ => {}
+        }
     }
+    Ok(false)
 }
 
 /// (instance only) placeholders and the skeleton cell left behind.
@@ -405,7 +420,7 @@ fn check_placeholders(target: &Path, add: &mut Findings) -> LintResult<()> {
         }
         let path = parts
             .iter()
-            .fold(target.to_path_buf(), |p, part| p.join(part));
+            .fold(target.to_path_buf(), |p, part| p.join(os_name(part)));
         let Ok(text) = read_text(&path)? else {
             continue;
         };
@@ -414,8 +429,8 @@ fn check_placeholders(target: &Path, add: &mut Findings) -> LintResult<()> {
         }
         let name = parts.last().map(String::as_str).unwrap_or_default();
         if suffix(name) == ".json" {
-            if let Ok(value) = jsonio::parse(&text) {
-                if !holds_placeholder(&value) {
+            if let Some(value) = parse_json(&text)? {
+                if !holds_placeholder(&value, 0)? {
                     continue;
                 }
             }
@@ -431,7 +446,7 @@ pub fn read_events(path: &Path) -> LintResult<Vec<Obj>> {
     if is_file(path) {
         let text = read_utf8(path)?;
         for line in splitlines(&text) {
-            if let Ok(Value::Object(event)) = jsonio::parse(line) {
+            if let Some(Value::Object(event)) = parse_json(line)? {
                 events.push(event);
             }
         }
@@ -872,7 +887,7 @@ pub fn check(target: &Path, root: &Path, template: bool) -> LintResult<Vec<super
     for name in &expected {
         if folders.contains(name) {
             check_cell(
-                &cells_dir.join(name),
+                &cells_dir.join(os_name(name)),
                 &format!("cells/{name}"),
                 &phases,
                 &mut add,
@@ -907,4 +922,143 @@ pub fn check(target: &Path, root: &Path, template: bool) -> LintResult<Vec<super
         check_gates(target, &decl, &mut add)?;
     }
     Ok(add.0)
+}
+
+#[cfg(test)]
+mod tests {
+    //! Verdicts pinned against the baseline (review round 1, K2 and K7).
+    use super::*;
+    use crate::jsonio;
+    use crate::lint::control::build_valid_instance;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+    /// A fresh valid instance under the system temp folder: (root, instance).
+    fn valid_instance() -> (PathBuf, PathBuf) {
+        let n = NEXT.fetch_add(1, Ordering::SeqCst);
+        let root = std::env::temp_dir().join(format!("pm-lint-rules-{}-{n}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let template = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/campaigns/_template");
+        let instance = build_valid_instance(&template, &root).ok().unwrap();
+        (root, instance)
+    }
+
+    fn findings(root: &Path, instance: &Path) -> Vec<super::super::Finding> {
+        let found = check(instance, root, false).ok().unwrap();
+        fs::remove_dir_all(root).unwrap();
+        found
+    }
+
+    /// Insert `text` right after the opening brace of a JSON object file.
+    fn insert_after_brace(path: &Path, text: &str) {
+        let old = fs::read_to_string(path).unwrap();
+        let at = old.find('{').unwrap() + 1;
+        fs::write(path, format!("{}{text}{}", &old[..at], &old[at..])).unwrap();
+    }
+
+    #[test]
+    fn non_finite_numbers_in_a_declaration_pass_like_the_baseline() {
+        let (root, instance) = valid_instance();
+        insert_after_brace(
+            &instance.join("campaign.json"),
+            "\n  \"NaN\": NaN, \"_inf\": [Infinity, -Infinity],",
+        );
+        let status = fs::read_dir(instance.join("cells/alpha/phases"))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| p.to_string_lossy().ends_with(".status.json"))
+            .unwrap();
+        insert_after_brace(&status, "\n  \"_n\": NaN,");
+        assert_eq!(findings(&root, &instance), vec![]);
+    }
+
+    #[test]
+    fn deep_placeholder_walk_ends_like_the_baseline() {
+        // Reading and dropping a 3000-deep value recurses; give it room.
+        std::thread::Builder::new()
+            .stack_size(64 << 20)
+            .spawn(deep_placeholder_walk)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    fn deep_placeholder_walk() {
+        let nested = |n: usize, leaf: &str| format!("{}{leaf}{}", "[".repeat(n), "]".repeat(n));
+        let walk = |text: String| holds_placeholder(&jsonio::parse(&text).ok().unwrap(), 0);
+        let note =
+            |n: usize, leaf: &str| format!("{{\"_p\": \"<<FILL>>\", \"d\": {}}}", nested(n, leaf));
+        assert!(matches!(walk(note(993, "1")), Ok(false)));
+        assert!(matches!(walk(note(994, "1")), Err(LintError::Internal(_))));
+        assert!(matches!(walk(nested(994, "\"<<FILL>>\"")), Ok(true)));
+        assert!(matches!(
+            walk(nested(995, "\"<<FILL>>\"")),
+            Err(LintError::Internal(_))
+        ));
+        let early = format!("{{\"a\": \"<<FILL>>\", \"d\": {}}}", nested(3000, ""));
+        assert!(matches!(walk(early), Ok(true)));
+    }
+
+    /// Append a copy of the last journey event with `utc` replaced.
+    fn journey_verdict(utc: &str) -> Vec<String> {
+        let (root, instance) = valid_instance();
+        let path = instance.join("journey.jsonl");
+        let text = fs::read_to_string(&path).unwrap();
+        let last = text.lines().last().unwrap();
+        let mut event = jsonio::parse(last).ok().unwrap();
+        event["utc"] = Value::from(utc);
+        fs::write(&path, format!("{text}{}\n", jsonio::compact(&event))).unwrap();
+        findings(&root, &instance)
+            .into_iter()
+            .map(|f| format!("{} {} {}", f.rule, f.path, f.message))
+            .collect()
+    }
+
+    #[test]
+    fn journey_times_the_baseline_accepts() {
+        for utc in [
+            "2027-01-01T00:00:05 +00:00",
+            "2027-01-01T00:00:05+0000",
+            "2027-01-01 00:00:05Z",
+            "20270101T000005Z",
+            "2027-01-01T00:00:05+00",
+            "2027-W01-1T00:00:05+00:00",
+            "2027-01-01T00:00:05,5+00:00",
+            "2027-01-01T00:00:05.1234567+00:00",
+            "2027-01-01T00:00:05+00:00:30.5",
+            "2027-01-01T00Z",
+            "2027-01-01T00:00:05 -05:30",
+        ] {
+            assert_eq!(journey_verdict(utc), Vec::<String>::new(), "{utc}");
+        }
+    }
+
+    #[test]
+    fn journey_times_the_baseline_rejects() {
+        let line = "journey-invalid journey.jsonl:8";
+        for (utc, message) in [
+            ("2027-01-01T00:00:05", "utc needs a time zone"),
+            ("2027-01-01", "utc needs a time zone"),
+            ("2027-01-01T24:00:00+00:00", "utc is not an ISO 8601 time"),
+            ("2027-01-01T00:00:05+25:00", "utc is not an ISO 8601 time"),
+            ("2027-02-29T00:00:00Z", "utc is not an ISO 8601 time"),
+            (" 2027-01-01T00:00:05Z", "utc is not an ISO 8601 time"),
+            ("2027-01-01T00:00:05z", "utc is not an ISO 8601 time"),
+            (
+                "\u{ff12}027-01-01T00:00:05+00:00",
+                "utc is not an ISO 8601 time",
+            ),
+            ("2026-01-01T00:00:05 +00:00", "time goes backward"),
+        ] {
+            assert_eq!(
+                journey_verdict(utc),
+                vec![format!("{line} {message}")],
+                "{utc}"
+            );
+        }
+    }
 }

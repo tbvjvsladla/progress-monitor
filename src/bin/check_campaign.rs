@@ -3,7 +3,7 @@
 fn main() {
     let argv: Vec<String> = std::env::args_os()
         .skip(1)
-        .map(|a| a.to_string_lossy().into_owned())
+        .map(|a| progress_monitor::lint::py_text(&a))
         .collect();
     std::process::exit(progress_monitor::lint::cli::main(&argv));
 }
