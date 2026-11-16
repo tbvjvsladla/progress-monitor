@@ -45,7 +45,7 @@ prepare 계획(`commands/` 하위 폴더, `consts.rs`, `gates.rs`)보다 파일 
 
 ### 회차 1 검토 지적의 해소 (attempt 2)
 
-- r1-K1·K2 JSON 완전 보존: `jsonio::parse`가 `json.loads`를 직접 이식한다. 숫자는 serde_json `arbitrary_precision`으로 출력 문구를 그대로 들고 다닌다. 정수는 모든 자리(4300자리 초과는 기준선의 `ValueError`), `-0`은 `0`, float는 올바른 반올림으로 읽어 Python `repr`로 쓴다(`-943305.0469559873` 왕복, `1e400` → `Infinity`). `NaN`·`Infinity`·`-Infinity`를 읽고 쓴다. 고립 서로게이트 `\udxxx`는 평면 16 사용자 영역 U+10F000–U+10F7FF의 대리 문자로 보존하고, 파일·stdout·journey·해시로 내보낼 때 기준선과 같은 `UnicodeEncodeError`(위치 포함)가 된다. `write_json`은 이때 빈 `.tmp`를 남기고, 일반 명령의 stdout 출력이면 stdout은 비고 exit 1이다. `--briefing-every-hours inf`는 `Infinity`로 저장되고, 그 뒤 `briefing_due`는 기준선처럼 `OverflowError`가 된다. 중첩 9997단 초과는 `RecursionError`. 오류 문구도 `JSONDecodeError`와 같다(자동 대조 11240건 일치).
+- r1-K1·K2 JSON 완전 보존: `jsonio::parse`가 `json.loads`를 직접 이식한다. 숫자는 serde_json `arbitrary_precision`으로 출력 문구를 그대로 들고 다닌다. 정수는 모든 자리(4300자리 초과는 기준선의 `ValueError`), `-0`은 `0`, float는 올바른 반올림으로 읽어 Python `repr`로 쓴다(`-943305.0469559873` 왕복, `1e400` → `Infinity`). `NaN`·`Infinity`·`-Infinity`를 읽고 쓴다. 고립 서로게이트 `\udxxx`는 표지 U+10FFFF와 대리 문자(U+10F000–U+10F7FF) 두 글자로 보존하고(회차 2에서 표현을 바꿈, 아래 절), 파일·stdout·journey·해시로 내보낼 때 기준선과 같은 `UnicodeEncodeError`(위치 포함)가 된다. `write_json`은 이때 빈 `.tmp`를 남기고, 일반 명령의 stdout 출력이면 stdout은 비고 exit 1이다. `--briefing-every-hours inf`는 `Infinity`로 저장되고, 그 뒤 `briefing_due`는 기준선처럼 `OverflowError`가 된다. 중첩 9997단 초과는 `RecursionError`. 오류 문구도 `JSONDecodeError`와 같다(자동 대조 11240건 일치).
 - r1-K3: `proc::capture_bytes`의 시간 제한이 자식 종료와 두 파이프 EOF를 함께 덮는다(`communicate(timeout)`). 초과면 자식만 죽이고 거둔다. git 시간 초과 문구는 `Command '[...]' timed out after 120 seconds`, 실행 실패는 `[Errno N] ...: 'git'`.
 - r1-K4: `env_probe`와 `git` 출력은 엄격한 UTF-8(stdout 먼저, stderr도)로 푼다. 실패는 기준선과 같은 `UnicodeDecodeError: 'utf-8' codec can't decode ...` 문구로 `ok:false`, exit 2.
 - r1-K5: `init`에서 `Usage` 밖의 오류(OS 오류)는 stdout 없이 stderr의 traceback 끝줄과 exit 1.
@@ -55,14 +55,29 @@ prepare 계획(`commands/` 하위 폴더, `consts.rs`, `gates.rs`)보다 파일 
 - r1-B2: `Paths::exe` 주석을 실행 파일 경로로 고쳤다.
 - 정수 예산·`round_cap`·`review_round`는 i64 범위 밖 정수도 받는다(i64로 포화). 깊은 JSON을 재귀로 다루므로 `pm`은 명령을 512 MiB 스택 스레드에서 돌린다(가상 예약만 한다).
 
-### 남은 차이 (의도한 변경 1~7 밖)
+### 회차 2: 사설 영역 문자와 고립 서로게이트의 구분 (attempt 3)
 
-- 들여쓰기 출력(`json.dumps(indent=2)`, 기준선은 순수 Python 인코더)의 `RecursionError`: 기준선은 깊이 약 1000 이상의 값을 stdout·파일로 쓰지 못하는데(예: `event`에 3000단 배열, exit 1 traceback) Rust는 쓴다. 읽기 쪽 한계(9997단)도 기준선의 호출 깊이에 따라 몇 단 다를 수 있다.
-- 이름(cell·group·check·phase)이 문자열이 아닌 선언은 `str()` 문자열로 비교한다(기준선은 `1 != "1"`). check_campaign이 거르는 입력이다.
-- i128 밖 정수의 산술·비교는 float로 한다(입출력 문구는 보존).
-- 고립 서로게이트의 대리 문자와 같은 실제 문자(U+10F000–U+10F7FF)가 함께 있으면 구분하지 못한다. 인자·환경 변수의 비 UTF-8 바이트(기준선은 surrogateescape)는 U+FFFD로 읽는다.
-- 검사 로그의 `errors="replace"` 대체 문자 개수: 대조하지 않았다(판정에는 `expect` 포함 여부만 쓴다).
-- `init`의 OS 오류 traceback 끝줄 문구(stderr)는 Rust 오류 문구다.
+사용자 결정(2026-11-16)으로 남은 차이 (4)를 고쳤다.
+
+- 표현(`jsonio::Unit`, `from_units`, `units`): 기준선 문자열의 한 원소는 문자 또는 고립 서로게이트다. 고립 서로게이트는 표지 `MARK`(U+10FFFF) 뒤의 대리 문자(U+10F000+(code−0xD800))로 든다. 대리 문자는 표지 바로 뒤에서만 서로게이트이고, 혼자 있으면 실제 문자다. 실제 U+10FFFF는 표지나 대리 문자 앞(또는 서로게이트 앞)에서만 표지 두 개로 쓰고 그 밖에서는 그대로다. 그래서 서로게이트가 없고 U+10FFFF가 그런 자리에 없는 글은 문자 그대로 들고 다닌다.
+- 들어오는 경계(실제 글 → 든 형태): `jsonio::parse`(문자 그대로의 글자와 `\u` 이스케이프, 짝 지은 서로게이트), `lint::py_text`(파일 이름, surrogateescape), `pm` 인자, `PM_EXECUTOR`, 검사 `env` 값, 경로 문구(`jsonio::path_text`: `status`의 instance·target, `explore`·영수증의 target, `brief`의 write_to, `init`의 root, `Paths::shown`).
+- 나가는 경계(든 형태 → 실제 글): `jsonio::encode`(이전 `encodable`; 위치는 원소 단위로 세고, 성공하면 실제 글을 돌려준다)를 파일(`write_json`, journey, `cell add`의 cell.md)·stdout(`print_json`, stop-hook, check_campaign)·해시(`digest`)에 쓴다. 경로·명령·변수 이름은 `jsonio::os_text`(표지를 떼고, 서로게이트는 대리 문자 그대로): 단계·gate·영수증·로그·포인터 경로, `target.root`, 검사 `cwd`, `/bin/sh -c`의 명령, `git` 인자, 검사 `env` 이름, `event` 인자의 JSON 글. `lint::os_name`은 U+DC80..U+DCFF를 원래 바이트로 되돌린다.
+- 순서: `sort_keys`(정렬된 compact, 해시 입력)와 `py_order`가 원소의 코드 포인트로 비교한다(서로게이트 U+D800..U+DFFF < U+E000 < 실제 U+10F000).
+- 같이 고친 것: `py::repr_str`가 `str.isprintable`이 거부하는 문자(Cc·Cf·Cs·Co·Cn·Zl·Zp·공백 외 Zs, Unicode 15.0.0)를 `\xhh`/`\uhhhh`/`\Uhhhhhhhh`로 쓴다(`src/printable.rs`, 기준선 인터프리터의 `unicodedata`에서 만든 712개 범위). `metrics`의 `check_seconds`는 영수증이 없으면 정수 `0`이다(기준선 `round(sum(()), 3)`).
+- 회귀 시험: `jsonio::tests::real_plane_16_characters_beside_lone_surrogates`(실제 U+10F000·U+10F7FF·U+10FFFF가 글자와 이스케이프로 같고, 서로게이트와 섞인 글의 원소·인코딩 오류 위치·`sort_keys` 순서), `printable::tests::printable_as_baseline`, `py` 시험의 `repr_str` 사례.
+
+### 의도한 변경 8 (사용자 수용, 2026-11-16)
+
+회차 1 뒤에 남은 다음 차이를 사용자가 의도한 변경으로 받았다(journey `cell-reopen`, 2026-11-16T03:29:43Z).
+
+1. 들여쓰기 출력(`json.dumps(indent=2)`, 기준선은 순수 인코더)의 `RecursionError`: 기준선은 깊이 약 1000 이상의 값을 stdout·파일로 쓰지 못하는데(예: `event`에 3000단 배열, exit 1 traceback) Rust는 쓴다. 읽기 쪽 한계(9997단)도 기준선의 호출 깊이에 따라 몇 단 다를 수 있다.
+2. 이름(cell·group·check·phase)이 문자열이 아닌 선언은 `str()` 문자열로 비교한다(기준선은 `1 != "1"`). check_campaign이 거르는 입력이다.
+3. i128 밖 정수의 산술·비교는 float로 한다(입출력 문구는 보존).
+4. 인자·환경 변수의 비 UTF-8 바이트(기준선은 surrogateescape)는 U+FFFD로 읽는다(`pm`; check_campaign의 인자는 `py_text`로 보존).
+5. 검사 로그의 `errors="replace"` 대체 문자 개수: 대조하지 않았다(판정에는 `expect` 포함 여부만 쓴다).
+6. `init`의 OS 오류 traceback 끝줄 문구(stderr)는 Rust 오류 문구다.
+
+의도한 변경 1~8 밖으로 알려진 차이는 없다.
 
 ### 검사
 
@@ -72,17 +87,21 @@ prepare 계획(`commands/` 하위 폴더, `consts.rs`, `gates.rs`)보다 파일 
 |---|---|---|
 | `cargo build --locked`, `cargo build --release --locked` | PASS | 0 |
 | `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings` (자기 확인) | PASS | 0 |
-| `cargo test --locked --no-fail-fast` (단위 21건 포함 전체) | PASS | 0 |
+| `cargo test --locked --no-fail-fast` (전체 90건, 단위 28건 포함) | PASS | 0 |
 | 오라클 `PM_BIN=target/release/pm PM_LINT_BIN=target/release/check_campaign` | PASS (Ran 50, OK) | 0 |
 | `keycmp.sh` | PASS (KEYCMP-OK) | 0 |
-| `package_manifest --check` (MANIFEST 재생성 후) | PASS (75 files) | 0 |
+| `package_manifest --check` (MANIFEST 재생성 후) | PASS (76 files) | 0 |
 | `fromisoformat` 자동 대조 30526건(기준선 Python 3.12.3 결과와 UTC·오프셋 비교) | PASS (불일치 0) | 0 |
 | `json.loads`/`json.dumps` 자동 대조 13373건(값 출력·오류 종류·`JSONDecodeError` 문구) | PASS (불일치 0) | 0 |
 | 검토 재현 K1·K2·K3·K4·K5·K6·K10을 기준선과 나란히 실행(stdout·exit·인스턴스 파일) | PASS (시각 외 같음) | 0 |
 | 53단계 합성 인스턴스 직접 대조(attempt 1) | NOT_RUN (이번 회차에 다시 돌리지 않음, 오라클로 대신 확인) | - |
+| 회차 2: 실제 평면 16 문자·고립 서로게이트 혼합 `json.loads`/`dumps`/`sort_keys`/인코딩 오류 9544건(기준선 결과와 비교) | PASS (불일치 0) | 0 |
+| 회차 2: 위 13373건·30526건 재대조(표현 변경 뒤) | PASS (불일치 0) | 0 |
+| 회차 2: `repr` 1112068자(모든 비서로게이트 코드 포인트)와 따옴표 사례를 기준선 `repr`과 비교 | PASS (같음) | 0 |
+| 회차 2: 혼합 문자 시나리오 13단계(open, event 3건, cell add 2건, phase start/close, hitl open, status, metrics, brief, stop-hook)를 기준선과 나란히 실행, check_campaign 포함 | PASS (stdout·exit·인스턴스 파일이 시각·경로 외 같음) | 0 |
 | 묶음 검사(gate) | NOT_RUN (gate의 몫) | - |
 
-판정: **INCOMPLETE** — `scripts/pm.py`의 모든 명령을 이식했고 회차 1 차단 지적은 모두 고쳤지만, 위 "남은 차이"가 의도한 변경 밖으로 남아 있다.
+판정: **COMPLETE** — `scripts/pm.py`의 모든 명령을 이식했고 회차 1 차단 지적과 회차 2의 표현 충돌을 고쳤다. 남은 차이는 사용자가 받은 의도한 변경 8에 옮겨 적었고, 그 밖의 알려진 차이는 없다. 묶음 검사는 gate가 판정한다.
 
 ## c11-lint — `scripts/check_campaign.py` → `src/lint/` + `src/bin/check_campaign.rs`
 

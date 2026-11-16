@@ -8,7 +8,7 @@ use serde_json::Value;
 use super::control::negative_control;
 use super::{check, findings_value, is_dir, os_path, py_text, LintError, RULES};
 use crate::error::PmError;
-use crate::jsonio::{encodable, pretty};
+use crate::jsonio::{encode, pretty};
 use crate::paths::{normalise, resolve, Paths};
 use crate::py::obj;
 
@@ -160,10 +160,11 @@ fn parse(argv: &[String]) -> Result<Args, ParseEnd> {
 /// Print the report; a text holding a name that is not UTF-8 cannot be written,
 /// which ends the command as the baseline's `UnicodeEncodeError` did (exit 1).
 fn print(value: Value) -> Result<(), LintError> {
-    let text = pretty(&value);
-    if let Err(PmError::Internal(why) | PmError::Usage(why)) = encodable(&text) {
-        return Err(LintError::Internal(why));
-    }
+    let text = match encode(&pretty(&value)) {
+        Ok(text) => text,
+        Err(PmError::Internal(why) | PmError::Usage(why)) => return Err(LintError::Internal(why)),
+        Err(other) => return Err(LintError::Internal(format!("{other:?}"))),
+    };
     let mut out = std::io::stdout().lock();
     let _ = writeln!(out, "{text}");
     let _ = out.flush();

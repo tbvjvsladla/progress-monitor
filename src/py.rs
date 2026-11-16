@@ -191,7 +191,14 @@ pub fn repr_str(text: &str) -> String {
     };
     let mut out = String::with_capacity(text.len() + 2);
     out.push(quote);
-    for ch in text.chars() {
+    for unit in crate::jsonio::units(text) {
+        let ch = match unit {
+            crate::jsonio::Unit::Char(c) => c,
+            crate::jsonio::Unit::Surrogate(code) => {
+                out.push_str(&format!("\\u{code:04x}"));
+                continue;
+            }
+        };
         match ch {
             '\\' => out.push_str("\\\\"),
             '\n' => out.push_str("\\n"),
@@ -204,9 +211,15 @@ pub fn repr_str(text: &str) -> String {
             c if (c as u32) < 0x20 || c as u32 == 0x7f => {
                 out.push_str(&format!("\\x{:02x}", c as u32));
             }
-            c if crate::jsonio::as_surrogate(c).is_some() => {
-                let code = crate::jsonio::as_surrogate(c).unwrap_or(0);
-                out.push_str(&format!("\\u{code:04x}"));
+            c if !crate::printable::is_printable(c) => {
+                let code = c as u32;
+                out.push_str(&if code < 0x100 {
+                    format!("\\x{code:02x}")
+                } else if code < 0x1_0000 {
+                    format!("\\u{code:04x}")
+                } else {
+                    format!("\\U{code:08x}")
+                });
             }
             c => out.push(c),
         }
@@ -501,6 +514,10 @@ mod tests {
         assert!(!is_plain_name("a/b"));
         assert_eq!(repr_str("it's"), "\"it's\"");
         assert_eq!(repr_str("a"), "'a'");
+        assert_eq!(
+            repr_str("\u{85}\u{a0}\u{ad}\u{200b}\u{e000}\u{10f000}\u{10ffff}é"),
+            "'\\x85\\xa0\\xad\\u200b\\ue000\\U0010f000\\U0010ffff\u{e9}'"
+        );
         assert_eq!(g_format(30.0), "30");
         assert_eq!(g_format(0.5), "0.5");
     }

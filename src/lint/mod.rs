@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use crate::jsonio::{self, JsonError};
+use crate::jsonio::{self, JsonError, Unit};
 use crate::py;
 
 pub mod cli;
@@ -202,27 +202,30 @@ pub fn exists(path: &Path) -> bool {
 }
 
 /// A file name as the baseline's text: UTF-8 with each undecodable byte held as
-/// the lone surrogate U+DC80..U+DCFF (`surrogateescape`), stored as the
-/// [`jsonio::surrogate_char`] stand-in. Printing such a name fails like the
-/// baseline's `UnicodeEncodeError` (see [`jsonio::encodable`]).
+/// the lone surrogate U+DC80..U+DCFF (`surrogateescape`), held as a
+/// [`jsonio::Unit::Surrogate`]. Printing such a name fails like the baseline's
+/// `UnicodeEncodeError` (see [`jsonio::encode`]).
 pub fn py_text(name: &OsStr) -> String {
-    let mut out = String::new();
+    let mut units = Vec::new();
     for chunk in name.as_bytes().utf8_chunks() {
-        out.push_str(chunk.valid());
+        units.extend(chunk.valid().chars().map(Unit::Char));
         for byte in chunk.invalid() {
-            out.push(jsonio::surrogate_char(0xDC00 + u32::from(*byte)));
+            units.push(Unit::Surrogate(0xDC00 + u32::from(*byte)));
         }
     }
-    out
+    jsonio::from_units(&units)
 }
 
 /// The file name [`py_text`] read: escaped bytes back to themselves.
 pub fn os_name(text: &str) -> OsString {
     let mut out = Vec::new();
-    for ch in text.chars() {
-        match jsonio::as_surrogate(ch) {
-            Some(code @ 0xDC80..=0xDCFF) => out.push((code - 0xDC00) as u8),
-            _ => out.extend_from_slice(ch.encode_utf8(&mut [0; 4]).as_bytes()),
+    for unit in jsonio::units(text) {
+        match unit {
+            Unit::Surrogate(code @ 0xDC80..=0xDCFF) => out.push((code - 0xDC00) as u8),
+            Unit::Surrogate(_) => {
+                out.extend_from_slice(jsonio::os_text(&jsonio::from_units(&[unit])).as_bytes());
+            }
+            Unit::Char(ch) => out.extend_from_slice(ch.encode_utf8(&mut [0; 4]).as_bytes()),
         }
     }
     OsString::from_vec(out)
@@ -251,10 +254,9 @@ pub fn file_name(path: &Path) -> String {
     path.file_name().map(py_text).unwrap_or_default()
 }
 
-/// Code point order of the baseline's strings: a stand-in sorts as its surrogate.
+/// Code point order of the baseline's strings: a surrogate sorts as its value.
 pub fn py_order(a: &str, b: &str) -> Ordering {
-    let key = |ch: char| jsonio::as_surrogate(ch).unwrap_or(ch as u32);
-    a.chars().map(key).cmp(b.chars().map(key))
+    jsonio::py_cmp(a, b)
 }
 
 /// The entries of a folder, sorted by name (code point order).
@@ -334,10 +336,7 @@ mod tests {
     fn undecodable_name_bytes_round_trip_as_escapes() {
         let raw = OsString::from_vec(b"c\xfe-\xc3\xa9\xed\xa0\x80".to_vec());
         let text = py_text(&raw);
-        let codes: Vec<u32> = text
-            .chars()
-            .map(|c| jsonio::as_surrogate(c).unwrap_or(c as u32))
-            .collect();
+        let codes: Vec<u32> = jsonio::code_points(&text).collect();
         assert_eq!(codes, [0x63, 0xDCFE, 0x2D, 0xE9, 0xDCED, 0xDCA0, 0xDC80]);
         assert_eq!(os_name(&text), raw);
         assert_eq!(py_order(&text, "c\u{e000}"), Ordering::Less);

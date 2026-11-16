@@ -243,7 +243,10 @@ pub fn exit_code(status: ExitStatus) -> i64 {
 /// timeout is (1, the exception text). Output that is not UTF-8 is an error.
 pub fn git(root: &Path, args: &[&str]) -> Res<(i64, String)> {
     let mut command = Command::new("git");
-    command.arg("-C").arg(root).args(args);
+    command
+        .arg("-C")
+        .arg(root)
+        .args(args.iter().map(|a| crate::jsonio::os_text(a)));
     match capture_bytes(command, None, Duration::from_secs(120)) {
         CapturedBytes::Done {
             status,
@@ -279,7 +282,7 @@ pub fn probe(cmd: &str, cwd: &Path) -> Res<String> {
     let mut command = Command::new("/bin/sh");
     command
         .arg("-c")
-        .arg(cmd)
+        .arg(crate::jsonio::os_text(cmd))
         .current_dir(cwd)
         .stdin(Stdio::null());
     Ok(
@@ -316,7 +319,7 @@ fn spawn_in_session(cmd: &str, cwd: &Path, log: &File) -> std::io::Result<Child>
     let mut command = Command::new("/bin/sh");
     command
         .arg("-c")
-        .arg(cmd)
+        .arg(crate::jsonio::os_text(cmd))
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::from(log.try_clone()?))

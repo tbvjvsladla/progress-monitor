@@ -294,14 +294,17 @@ pub fn stop_hook(base: &Path, harness: &str, executor: &str, paths: &Paths) {
     let message = match result {
         Ok(Ok(None)) => return,
         Ok(Ok(Some(line))) => {
-            if let Err(e) = crate::jsonio::encodable(&line) {
-                let _ = writeln!(
-                    std::io::stderr(),
-                    "[{TOOL}] stop-hook error, not blocking: {}",
-                    describe(&e)
-                );
-                return;
-            }
+            let line = match crate::jsonio::encode(&line) {
+                Ok(line) => line,
+                Err(e) => {
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "[{TOOL}] stop-hook error, not blocking: {}",
+                        describe(&e)
+                    );
+                    return;
+                }
+            };
             let mut stdout = std::io::stdout().lock();
             match writeln!(stdout, "{line}").and_then(|()| stdout.flush()) {
                 Ok(()) => return,

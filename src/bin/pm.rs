@@ -7,7 +7,7 @@ const STACK_BYTES: usize = 512 << 20;
 fn main() {
     let argv: Vec<String> = std::env::args_os()
         .skip(1)
-        .map(|a| a.to_string_lossy().into_owned())
+        .map(|a| progress_monitor::jsonio::mark(&a.to_string_lossy()))
         .collect();
     let hook = argv.iter().any(|a| a == "stop-hook");
     let run = std::thread::Builder::new()

@@ -4,6 +4,8 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::jsonio::Unit;
+
 const US_PER_SEC: i64 = 1_000_000;
 const US_PER_DAY: i64 = 86_400 * US_PER_SEC;
 
@@ -330,30 +332,28 @@ fn parse_time_part(b: &Bytes, start: usize, end: usize) -> Option<TimePart> {
 /// None: invalid; Some(None): naive; Some(Some(moment)): with a time zone.
 fn parse_iso(text: &str) -> Option<Option<Moment>> {
     let text = text.replace('Z', "+00:00");
-    let mut chars: Vec<char> = text.chars().collect();
-    if chars.len() < 7 {
+    let mut units: Vec<Unit> = crate::jsonio::units(&text).collect();
+    if units.len() < 7 {
         return None;
     }
     // _sanitize_isoformat_str: a lone surrogate separator at 7, 8 or 10 reads as 'T'
     for pos in [7, 8, 10] {
-        if pos > chars.len() {
+        if pos > units.len() {
             break;
         }
-        if chars
-            .get(pos)
-            .is_some_and(|c| crate::jsonio::as_surrogate(*c).is_some())
-        {
-            chars[pos] = 'T';
+        if matches!(units.get(pos), Some(Unit::Surrogate(_))) {
+            units[pos] = Unit::Char('T');
             break;
         }
     }
-    if chars
-        .iter()
-        .any(|c| crate::jsonio::as_surrogate(*c).is_some())
-    {
-        return None; // not encodable as UTF-8
+    let mut real = String::with_capacity(text.len());
+    for unit in units {
+        match unit {
+            Unit::Char(c) => real.push(c),
+            Unit::Surrogate(_) => return None, // not encodable as UTF-8
+        }
     }
-    let text: String = chars.into_iter().collect();
+    let text = real;
     let b = Bytes(text.as_bytes());
     let len = text.len();
     let sep = separator_at(&b, len)?;

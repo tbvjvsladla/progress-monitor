@@ -3,7 +3,7 @@
 //! Reading follows `json.loads`: `NaN`, `Infinity` and `-Infinity` are numbers,
 //! integers keep every digit (up to the 4300-digit conversion limit), floats are
 //! read with correct rounding, `-0` is the integer 0, and a lone surrogate escape
-//! such as `\ud800` is kept (as a stand-in character, see [`surrogate_char`]).
+//! such as `\ud800` is kept (as [`MARK`] and a stand-in character, see [`Unit`]).
 //! Numbers are held as their output text (serde_json `arbitrary_precision`).
 //!
 //! Three layouts: pretty (indent 2, file and stdout), compact (`", "` and `": "`,
@@ -11,7 +11,7 @@
 //! the input of every hash). Strings keep non-ASCII text; `"`, `\`, and control
 //! characters are escaped with lowercase `\u00xx`. Text holding a lone surrogate
 //! cannot be encoded as UTF-8: writing it fails as the baseline's
-//! `UnicodeEncodeError` did ([`encodable`]).
+//! `UnicodeEncodeError` did ([`encode`]).
 
 use std::fs;
 use std::io::ErrorKind;
@@ -23,8 +23,14 @@ use crate::error::{PmError, Res};
 use crate::py::{decode_error, number_text};
 
 /// First code point of the stand-ins for the lone surrogates U+D800..U+DFFF
-/// (plane 16 private use, U+10F000..U+10F7FF).
+/// (plane 16 private use, U+10F000..U+10F7FF). A stand-in is a surrogate only
+/// right after [`MARK`]; alone it is the real character.
 const SURROGATE_BASE: u32 = 0x10_F000;
+
+/// Leads a surrogate's stand-in. A real U+10FFFF is written as two marks only
+/// where it would otherwise lead (before a mark or a stand-in); elsewhere it is
+/// itself, so text without surrogates is held exactly as its characters.
+pub const MARK: char = '\u{10FFFF}';
 
 /// Nesting depth at which the baseline's decoder raised `RecursionError`.
 const MAX_DEPTH: usize = 9_997;
@@ -32,17 +38,114 @@ const MAX_DEPTH: usize = 9_997;
 /// The baseline's limit on the digits of an integer read from text.
 const INT_MAX_STR_DIGITS: usize = 4_300;
 
-/// The stand-in character held in place of the lone surrogate `code`.
-pub fn surrogate_char(code: u32) -> char {
+/// One element of the baseline's strings: a character or a lone surrogate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unit {
+    Char(char),
+    Surrogate(u32),
+}
+
+impl Unit {
+    /// The code point (a surrogate's own value).
+    pub fn code(self) -> u32 {
+        match self {
+            Unit::Char(c) => c as u32,
+            Unit::Surrogate(code) => code,
+        }
+    }
+}
+
+fn is_stand_in(ch: char) -> bool {
+    (SURROGATE_BASE..SURROGATE_BASE + 0x800).contains(&(ch as u32))
+}
+
+fn stand_in(code: u32) -> char {
     char::from_u32(SURROGATE_BASE + (code - 0xD800)).expect("plane 16 is valid")
 }
 
-/// The lone surrogate a stand-in character holds, if it is one.
-pub fn as_surrogate(ch: char) -> Option<u32> {
-    let c = ch as u32;
-    (SURROGATE_BASE..SURROGATE_BASE + 0x800)
-        .contains(&c)
-        .then(|| c - SURROGATE_BASE + 0xD800)
+/// The held form of a sequence of units (see [`MARK`]).
+pub fn from_units(units: &[Unit]) -> String {
+    let mut out = String::with_capacity(units.len());
+    for (k, unit) in units.iter().enumerate() {
+        match *unit {
+            Unit::Surrogate(code) => {
+                out.push(MARK);
+                out.push(stand_in(code));
+            }
+            Unit::Char(MARK) => {
+                let leads = match units.get(k + 1) {
+                    Some(Unit::Char(next)) => *next == MARK || is_stand_in(*next),
+                    Some(Unit::Surrogate(_)) => true,
+                    None => false,
+                };
+                out.push(MARK);
+                if leads {
+                    out.push(MARK);
+                }
+            }
+            Unit::Char(c) => out.push(c),
+        }
+    }
+    out
+}
+
+/// Real text (from an argument, a variable, a path) in the held form.
+pub fn mark(text: &str) -> String {
+    if !text.contains(MARK) {
+        return text.to_string();
+    }
+    from_units(&text.chars().map(Unit::Char).collect::<Vec<_>>())
+}
+
+/// [`mark`] of a path's text.
+pub fn path_text(path: &Path) -> String {
+    mark(&path.display().to_string())
+}
+
+/// The units of a held string.
+pub fn units(text: &str) -> impl Iterator<Item = Unit> + '_ {
+    let mut chars = text.chars().peekable();
+    std::iter::from_fn(move || {
+        let ch = chars.next()?;
+        if ch != MARK {
+            return Some(Unit::Char(ch));
+        }
+        Some(match chars.peek() {
+            Some(&MARK) => {
+                chars.next();
+                Unit::Char(MARK)
+            }
+            Some(&next) if is_stand_in(next) => {
+                chars.next();
+                Unit::Surrogate(next as u32 - SURROGATE_BASE + 0xD800)
+            }
+            _ => Unit::Char(MARK),
+        })
+    })
+}
+
+/// The code points of a held string, a surrogate as its own value.
+pub fn code_points(text: &str) -> impl Iterator<Item = u32> + '_ {
+    units(text).map(Unit::code)
+}
+
+/// Code point order of the baseline's strings.
+pub fn py_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    code_points(a).cmp(code_points(b))
+}
+
+/// A held string as the text handed to the system (a path, a command, a
+/// variable name): marks dropped, a surrogate left as its stand-in character.
+pub fn os_text(text: &str) -> String {
+    if !text.contains(MARK) {
+        return text.to_string();
+    }
+    units(text)
+        .map(|u| match u {
+            Unit::Char(c) => c,
+            Unit::Surrogate(code) => stand_in(code),
+        })
+        .collect()
 }
 
 /// Why a text did not decode.
@@ -206,14 +309,14 @@ impl Parser<'_> {
 
     /// The string whose body starts at `start` (after the opening quote).
     fn string(&self, start: usize) -> Result<(String, usize), JsonError> {
-        let mut out = String::new();
+        let mut out: Vec<Unit> = Vec::new();
         let mut i = start;
         loop {
             let Some(ch) = self.at(i) else {
                 return Err(self.fail("Unterminated string starting at", start - 1));
             };
             match ch {
-                '"' => return Ok((out, i + 1)),
+                '"' => return Ok((from_units(&out), i + 1)),
                 '\\' => {
                     let Some(esc) = self.at(i + 1) else {
                         return Err(self.fail("Unterminated string starting at", start - 1));
@@ -231,7 +334,7 @@ impl Parser<'_> {
                         _ => return Err(self.fail("Invalid \\escape", i)),
                     };
                     if let Some(c) = simple {
-                        out.push(c);
+                        out.push(Unit::Char(c));
                         i += 2;
                         continue;
                     }
@@ -251,22 +354,24 @@ impl Parser<'_> {
                         };
                         if (0xDC00..0xE000).contains(&low) {
                             let joined = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
-                            out.push(char::from_u32(joined).expect("a joined pair is a scalar"));
+                            out.push(Unit::Char(
+                                char::from_u32(joined).expect("a joined pair is a scalar"),
+                            ));
                             i += 6;
                             continue;
                         }
                     }
                     if (0xD800..0xE000).contains(&code) {
-                        out.push(surrogate_char(code));
+                        out.push(Unit::Surrogate(code));
                     } else {
-                        out.push(char::from_u32(code).expect("not a surrogate"));
+                        out.push(Unit::Char(char::from_u32(code).expect("not a surrogate")));
                     }
                 }
                 c if (c as u32) < 0x20 => {
                     return Err(self.fail("Invalid control character at", i));
                 }
                 c => {
-                    out.push(c);
+                    out.push(Unit::Char(c));
                     i += 1;
                 }
             }
@@ -365,19 +470,28 @@ pub fn parse_or_skip(text: &str) -> Res<Option<Value>> {
     }
 }
 
-/// Fails like `str.encode("utf-8")` when `text` holds a lone surrogate.
-pub fn encodable(text: &str) -> Res<()> {
-    let mut chars = text.chars().enumerate().peekable();
-    while let Some((pos, ch)) = chars.next() {
-        let Some(code) = as_surrogate(ch) else {
-            continue;
+/// `str.encode("utf-8")` of a held text: the real text, or the baseline's
+/// `UnicodeEncodeError` when it holds a lone surrogate (positions count units).
+pub fn encode(text: &str) -> Res<String> {
+    if !text.contains(MARK) {
+        return Ok(text.to_string());
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut all = units(text).enumerate().peekable();
+    while let Some((pos, unit)) = all.next() {
+        let code = match unit {
+            Unit::Char(c) => {
+                out.push(c);
+                continue;
+            }
+            Unit::Surrogate(code) => code,
         };
         let mut end = pos + 1;
-        while chars
+        while all
             .peek()
-            .is_some_and(|(_, c)| as_surrogate(*c).is_some())
+            .is_some_and(|(_, u)| matches!(u, Unit::Surrogate(_)))
         {
-            chars.next();
+            all.next();
             end += 1;
         }
         let what = if end - pos == 1 {
@@ -389,7 +503,7 @@ pub fn encodable(text: &str) -> Res<()> {
             "UnicodeEncodeError: 'utf-8' codec can't encode {what}: surrogates not allowed"
         )));
     }
-    Ok(())
+    Ok(out)
 }
 
 fn escape(out: &mut String, text: &str) {
@@ -481,7 +595,7 @@ fn write_compact(out: &mut String, value: &Value, sort: bool) {
         Value::Object(map) => {
             let mut entries: Vec<(&String, &Value)> = map.iter().collect();
             if sort {
-                entries.sort_by(|a, b| a.0.cmp(b.0));
+                entries.sort_by(|a, b| py_cmp(a.0, b.0));
             }
             out.push('{');
             for (i, (key, item)) in entries.into_iter().enumerate() {
@@ -522,8 +636,7 @@ pub fn sorted_compact(value: &Value) -> String {
 /// SHA-256 hex of the sorted compact text.
 pub fn digest(value: &Value) -> Res<String> {
     use sha2::{Digest, Sha256};
-    let text = sorted_compact(value);
-    encodable(&text)?;
+    let text = encode(&sorted_compact(value))?;
     let hash = Sha256::digest(text.as_bytes());
     Ok(hash.iter().map(|b| format!("{b:02x}")).collect())
 }
@@ -561,12 +674,14 @@ pub fn write_json(path: &Path, value: &Value) -> Res<()> {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(".tmp");
     let temp = path.with_file_name(name);
-    let text = pretty(value) + "\n";
-    if let Err(err) = encodable(&text) {
-        // the baseline opened (emptied) the temporary file before the encoding failed
-        fs::write(&temp, "").map_err(|e| PmError::os(&e))?;
-        return Err(err);
-    }
+    let text = match encode(&(pretty(value) + "\n")) {
+        Ok(text) => text,
+        Err(err) => {
+            // the baseline opened (emptied) the temporary file before the encoding failed
+            fs::write(&temp, "").map_err(|e| PmError::os(&e))?;
+            return Err(err);
+        }
+    };
     fs::write(&temp, text).map_err(|e| PmError::os(&e))?;
     fs::rename(&temp, path).map_err(|e| PmError::os(&e))
 }
@@ -636,25 +751,68 @@ mod tests {
     fn lone_surrogates_are_kept_until_encoded() {
         let v = parse(r#"["\ud800", "\ud83d\ude00", "\udc00\ud800x"]"#).unwrap();
         assert_eq!(
-            v[0].as_str()
-                .unwrap()
-                .chars()
-                .map(as_surrogate)
-                .collect::<Vec<_>>(),
-            [Some(0xD800)]
+            units(v[0].as_str().unwrap()).collect::<Vec<_>>(),
+            [Unit::Surrogate(0xD800)]
         );
         assert_eq!(v[1].as_str(), Some("\u{1F600}"));
         let line = compact(&v);
         assert_eq!(
-            encodable(&line).unwrap_err().to_string_for_test(),
+            encode(&line).unwrap_err().to_string_for_test(),
             "UnicodeEncodeError: 'utf-8' codec can't encode character '\\ud800' in position 2: surrogates not allowed"
         );
         assert!(digest(&v).is_err());
         let two = compact(&v[2]);
         assert_eq!(
-            encodable(&two).unwrap_err().to_string_for_test(),
+            encode(&two).unwrap_err().to_string_for_test(),
             "UnicodeEncodeError: 'utf-8' codec can't encode characters in position 1-2: surrogates not allowed"
         );
+    }
+
+    /// Real plane 16 characters (U+10F000..U+10F7FF, U+10FFFF) next to lone
+    /// surrogates read and write as the baseline did (r2-4).
+    #[test]
+    fn real_plane_16_characters_beside_lone_surrogates() {
+        let real = "\u{10F000}\u{10F7FF}\u{10FFFF}\u{10FFFF}\u{10F000}\u{10FFFF}";
+        // the same text as literal characters and as escapes
+        let text = format!(
+            "[\"{real}\", \"\\udbfc\\udc00\\udbfd\\udfff\\udbff\\udfff\\udbff\\udfff\\udbfc\\udc00\\udbff\\udfff\"]"
+        );
+        let v = parse(&text).unwrap();
+        assert_eq!(v[0], v[1]);
+        let want: Vec<u32> = real.chars().map(|c| c as u32).collect();
+        assert_eq!(
+            code_points(v[0].as_str().unwrap()).collect::<Vec<_>>(),
+            want
+        );
+        assert_eq!(
+            encode(&compact(&v)).unwrap(),
+            format!("[\"{real}\", \"{real}\"]")
+        );
+        assert_eq!(os_text(v[0].as_str().unwrap()), real);
+        assert_eq!(mark(real), v[0].as_str().unwrap());
+
+        // mixed: U+10F000, lone U+D800, U+10FFFF, lone U+DFFF, U+10FFFF at the end
+        let mixed = parse("\"\u{10F000}\\ud800\u{10FFFF}\\udfff\u{10FFFF}\"").unwrap();
+        let held = mixed.as_str().unwrap();
+        assert_eq!(
+            units(held).collect::<Vec<_>>(),
+            [
+                Unit::Char('\u{10F000}'),
+                Unit::Surrogate(0xD800),
+                Unit::Char(MARK),
+                Unit::Surrogate(0xDFFF),
+                Unit::Char(MARK),
+            ]
+        );
+        assert_eq!(
+            encode(&compact(&mixed)).unwrap_err().to_string_for_test(),
+            "UnicodeEncodeError: 'utf-8' codec can't encode character '\\ud800' in position 2: surrogates not allowed"
+        );
+        // sort_keys orders a lone surrogate before U+E000 and real U+10F000 after it
+        let keys = parse("{\"\u{10F000}\": 1, \"\u{e000}\": 2, \"\\ud800\": 3}").unwrap();
+        let sorted = sorted_compact(&keys);
+        let order: Vec<u32> = code_points(&sorted).filter(|c| *c > 0x7f).collect();
+        assert_eq!(order, [0xD800, 0xE000, 0x10F000]);
     }
 
     /// Decoder messages and the errors that are not `JSONDecodeError`.

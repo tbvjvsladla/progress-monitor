@@ -117,8 +117,8 @@ impl Paths {
     pub fn shown(&self, path: &Path) -> String {
         match path.strip_prefix(&self.repo) {
             Ok(rel) if rel.as_os_str().is_empty() => ".".to_string(),
-            Ok(rel) => rel.display().to_string(),
-            Err(_) => path.display().to_string(),
+            Ok(rel) => crate::jsonio::path_text(rel),
+            Err(_) => crate::jsonio::path_text(path),
         }
     }
 

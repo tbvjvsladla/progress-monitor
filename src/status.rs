@@ -38,7 +38,7 @@ pub fn stale_checks(camp: &mut Campaign, gate: &Obj) -> Res<Vec<String>> {
             Some(p) if truthy(p) => py_str(p),
             _ => continue,
         };
-        let path = camp.dir.join(&pointer);
+        let path = camp.dir.join(crate::jsonio::os_text(&pointer));
         if !path.is_file() {
             continue;
         }
@@ -478,8 +478,8 @@ pub fn build_status(camp: &mut Campaign) -> Res<Obj> {
             "campaign",
             camp.decl.get("id").cloned().unwrap_or(Value::Null),
         ),
-        ("instance", Value::from(camp.dir.display().to_string())),
-        ("target", Value::from(camp.root.display().to_string())),
+        ("instance", Value::from(crate::jsonio::path_text(&camp.dir))),
+        ("target", Value::from(crate::jsonio::path_text(&camp.root))),
         ("cells", Value::Array(cells)),
         ("groups", Value::Array(groups)),
         (
@@ -601,7 +601,15 @@ pub fn build_metrics(camp: &mut Campaign) -> Res<Obj> {
         ),
         ("reused_ratio", ratio(counts[3])),
         ("covered_ratio", ratio(counts[4])),
-        ("check_seconds", Value::from(round3(check_seconds))),
+        // the baseline's sum() of no receipts is the integer 0
+        (
+            "check_seconds",
+            if receipts.is_empty() {
+                Value::from(0)
+            } else {
+                Value::from(round3(check_seconds))
+            },
+        ),
         ("gates", Value::Object(gates)),
     ]))
 }

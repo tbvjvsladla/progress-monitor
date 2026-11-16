@@ -221,13 +221,16 @@ pub fn run_check(
     explore: Option<&str>,
 ) -> Res<Obj> {
     let id = check_id(check)?;
-    let cwd = crate::paths::join(root, &check.get("cwd").map_or(".".to_string(), py_str));
+    let cwd = crate::paths::join(
+        root,
+        &crate::jsonio::os_text(&check.get("cwd").map_or(".".to_string(), py_str)),
+    );
     let timeout = timeout_of(camp, check)?;
-    let temp = camp.dir.join("logs").join(format!(
+    let temp = camp.dir.join("logs").join(crate::jsonio::os_text(&format!(
         ".{id}-{}-{}.tmp",
         std::process::id(),
         monotonic_ns()
-    ));
+    )));
     let cmd = py_str(need(check, "cmd")?);
     let expect = py_str(need(check, "expect")?);
     let done = execute(&cmd, &cwd, timeout, &temp).map_err(|e| PmError::os(&e))?;
@@ -250,9 +253,10 @@ pub fn run_check(
     let n_text = py_str(&number);
     let log = format!("logs/{id}-{n_text}.log");
     if temp.exists() {
-        fs::rename(&temp, camp.dir.join(&log)).map_err(|e| PmError::os(&e))?;
+        fs::rename(&temp, camp.dir.join(crate::jsonio::os_text(&log)))
+            .map_err(|e| PmError::os(&e))?;
     } else {
-        fs::write(camp.dir.join(&log), "").map_err(|e| PmError::os(&e))?;
+        fs::write(camp.dir.join(crate::jsonio::os_text(&log)), "").map_err(|e| PmError::os(&e))?;
     }
     let mut covers = plan.covers.clone();
     let mut reusable = plan.fp.reusable;
@@ -287,12 +291,15 @@ pub fn run_check(
         ("executor", Value::from(camp.executor.as_str())),
         ("forced", Value::Bool(forced)),
         ("reason", opt(&receipt_reason)),
-        ("target", Value::from(root.display().to_string())),
+        ("target", Value::from(crate::jsonio::path_text(root))),
         ("explore", explore.map_or(Value::Null, Value::from)),
         ("covers", Value::Object(covers)),
     ]);
     let path = format!("receipts/{id}/{n_text}.json");
-    write_json(&camp.dir.join(&path), &Value::Object(receipt))?;
+    write_json(
+        &camp.dir.join(crate::jsonio::os_text(&path)),
+        &Value::Object(receipt),
+    )?;
     let outcome = if result == "ERROR" {
         "error"
     } else {

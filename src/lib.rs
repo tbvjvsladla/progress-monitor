@@ -24,6 +24,7 @@ pub mod lint;
 pub mod lock;
 pub mod manifest;
 pub mod paths;
+pub mod printable;
 pub mod proc;
 pub mod py;
 pub mod sanitize;

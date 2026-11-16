@@ -147,7 +147,8 @@ impl Campaign {
                 )));
             }
         }
-        let root_text = decl["target"].get("root").map(py_str).unwrap_or_default();
+        let root_text =
+            crate::jsonio::os_text(&decl["target"].get("root").map(py_str).unwrap_or_default());
         self.root = if Path::new(&root_text).is_absolute() {
             join(Path::new("/"), &root_text)
         } else {
@@ -421,8 +422,7 @@ impl Campaign {
             .create(true)
             .open(&path)
             .map_err(|e| PmError::os(&e))?;
-        let line = compact(&Value::Object(event.clone())) + "\n";
-        crate::jsonio::encodable(&line)?;
+        let line = crate::jsonio::encode(&(compact(&Value::Object(event.clone())) + "\n"))?;
         file.write_all(line.as_bytes())
             .map_err(|e| PmError::os(&e))?;
         events.push(event.clone());
@@ -433,9 +433,9 @@ impl Campaign {
     pub fn phase_path(&self, cell: &str, phase: &str) -> PathBuf {
         self.dir
             .join("cells")
-            .join(cell)
+            .join(crate::jsonio::os_text(cell))
             .join("phases")
-            .join(format!("{phase}{SUFFIX}"))
+            .join(crate::jsonio::os_text(&format!("{phase}{SUFFIX}")))
     }
 
     pub fn phase(&self, cell: &str, phase: &str) -> Res<Obj> {
@@ -468,7 +468,9 @@ impl Campaign {
 
     // -- gates
     fn gate_path(&self, group: &str) -> PathBuf {
-        self.dir.join("gates").join(format!("{group}{SUFFIX}"))
+        self.dir
+            .join("gates")
+            .join(crate::jsonio::os_text(&format!("{group}{SUFFIX}")))
     }
 
     pub fn gate(&self, group: &str) -> Res<Obj> {
@@ -532,7 +534,10 @@ impl Campaign {
 
     // -- receipts
     pub fn receipts(&self, check: &str) -> Res<Vec<Obj>> {
-        let folder = self.dir.join("receipts").join(check);
+        let folder = self
+            .dir
+            .join("receipts")
+            .join(crate::jsonio::os_text(check));
         let mut found = Vec::new();
         if folder.is_dir() {
             let entries = fs::read_dir(&folder).map_err(|e| PmError::os(&e))?;
@@ -593,7 +598,7 @@ impl Campaign {
         let path = self
             .dir
             .join("receipts")
-            .join(check)
+            .join(crate::jsonio::os_text(check))
             .join("invalidated.json");
         if !path.is_file() {
             return Ok(None);
@@ -678,7 +683,9 @@ impl Campaign {
         let mut env = Obj::new();
         for name in list_or_empty(check.get("env"))? {
             let name = py_str(&name);
-            let value = std::env::var(&name).ok().map_or(Value::Null, Value::from);
+            let value = std::env::var(crate::jsonio::os_text(&name))
+                .ok()
+                .map_or(Value::Null, |v| Value::from(crate::jsonio::mark(&v)));
             env.insert(name, value);
         }
         let ids = if why == Some("not-git") {

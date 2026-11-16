@@ -338,7 +338,7 @@ pub fn cmd_phase_close(camp: &mut Campaign, args: &Args) -> Out {
         let a = py_str(&attempt);
         let mut index = 0;
         let mut log = format!("logs/{name}-{phase}-{a}.log");
-        while camp.dir.join(&log).exists() {
+        while camp.dir.join(crate::jsonio::os_text(&log)).exists() {
             index += 1;
             log = format!("logs/{name}-{phase}-{a}-{index}.log");
         }
@@ -346,13 +346,18 @@ pub fn cmd_phase_close(camp: &mut Campaign, args: &Args) -> Out {
         if !logs.is_dir() {
             fs::create_dir(&logs).map_err(|e| PmError::os(&e))?;
         }
-        fs::write(camp.dir.join(&log), "").map_err(|e| PmError::os(&e))?;
+        fs::write(camp.dir.join(crate::jsonio::os_text(&log)), "").map_err(|e| PmError::os(&e))?;
         (log, attempt, check, expect)
     };
     let timeout = camp.budget("check_timeout_s") as f64;
     let root = camp.root.clone();
-    let done =
-        execute(&check, &root, timeout, &camp.dir.join(&log)).map_err(|e| PmError::os(&e))?;
+    let done = execute(
+        &check,
+        &root,
+        timeout,
+        &camp.dir.join(crate::jsonio::os_text(&log)),
+    )
+    .map_err(|e| PmError::os(&e))?;
     let ok = done.error.is_none() && done.exit_code == Some(0) && done.output.contains(&expect);
     let state = {
         let _guard = camp.lock(None)?;
@@ -666,7 +671,7 @@ fn final_current(camp: &mut Campaign, gate: &Obj) -> Res<bool> {
             Some(p) if truthy(p) => py_str(p),
             _ => return Ok(false),
         };
-        let path = camp.dir.join(&pointer);
+        let path = camp.dir.join(crate::jsonio::os_text(&pointer));
         if !path.is_file() {
             return Ok(false);
         }
@@ -805,7 +810,7 @@ pub fn cmd_check_invalidate(camp: &mut Campaign, args: &Args) -> Out {
         &camp
             .dir
             .join("receipts")
-            .join(check)
+            .join(crate::jsonio::os_text(check))
             .join("invalidated.json"),
         &Value::Object(obj([("utc", utc.clone()), ("reason", v(reason))])),
     )?;
@@ -890,9 +895,10 @@ pub fn cmd_explore_open(camp: &mut Campaign, args: &Args) -> Out {
 pub fn cmd_check_run(camp: &mut Campaign, args: &Args) -> Out {
     let name = args.pos(0);
     let explore = args.opt("--explore").unwrap_or("");
-    let target =
-        crate::paths::resolve(&crate::paths::normalise(args.opt("--target").unwrap_or("")))
-            .map_err(|e| PmError::Internal(format!("RuntimeError: {e}")))?;
+    let target = crate::paths::resolve(&crate::paths::normalise(&crate::jsonio::os_text(
+        args.opt("--target").unwrap_or(""),
+    )))
+    .map_err(|e| PmError::Internal(format!("RuntimeError: {e}")))?;
     let (check, plan, skipped) = {
         let _guard = camp.lock(None)?;
         let check = camp.check(name)?;
@@ -926,8 +932,8 @@ pub fn cmd_check_run(camp: &mut Campaign, args: &Args) -> Out {
                 }
             }
         }
-        seen.retain(|t| *t != base.display().to_string());
-        let target_text = target.display().to_string();
+        seen.retain(|t| *t != crate::jsonio::path_text(&base));
+        let target_text = crate::jsonio::path_text(&target);
         if target != base
             && !seen.contains(&target_text)
             && seen.len() as i64 >= camp.budget("explore_candidates")
@@ -957,7 +963,7 @@ pub fn cmd_check_run(camp: &mut Campaign, args: &Args) -> Out {
     let mut out = obj([
         ("ok", Value::Bool(ok)),
         ("explore", v(explore)),
-        ("target", Value::from(target.display().to_string())),
+        ("target", Value::from(crate::jsonio::path_text(&target))),
     ]);
     for (k, val) in result {
         out.insert(k, val);
@@ -1126,7 +1132,10 @@ fn nonempty_str(value: Option<&Value>) -> bool {
 }
 
 pub fn cmd_cell_add(camp: &mut Campaign, args: &Args) -> Out {
-    let spec = read_json(&crate::paths::normalise(args.pos(0)), None)?;
+    let spec = read_json(
+        &crate::paths::normalise(&crate::jsonio::os_text(args.pos(0))),
+        None,
+    )?;
     let Value::Object(spec) = spec else {
         return Err(PmError::usage("the spec must be a JSON object"));
     };
@@ -1198,7 +1207,7 @@ pub fn cmd_cell_add(camp: &mut Campaign, args: &Args) -> Out {
         review = need(&parent_cell, "review")?.clone();
         base = review_round(camp, &parent_cell)?;
     }
-    let folder = camp.dir.join("cells").join(&name);
+    let folder = camp.dir.join("cells").join(crate::jsonio::os_text(&name));
     fs::create_dir_all(folder.join("phases")).map_err(|e| PmError::os(&e))?;
     let mut body = vec![
         format!("# {name}"),
@@ -1217,7 +1226,15 @@ pub fn cmd_cell_add(camp: &mut Campaign, args: &Args) -> Out {
         });
         body.push(String::new());
     }
-    fs::write(folder.join("cell.md"), body.join("\n")).map_err(|e| PmError::os(&e))?;
+    let body = match crate::jsonio::encode(&body.join("\n")) {
+        Ok(body) => body,
+        Err(err) => {
+            // the baseline opened (emptied) the file before the encoding failed
+            fs::write(folder.join("cell.md"), "").map_err(|e| PmError::os(&e))?;
+            return Err(err);
+        }
+    };
+    fs::write(folder.join("cell.md"), body).map_err(|e| PmError::os(&e))?;
     for phase in &phases {
         let proof = spec[phase.as_str()]
             .as_object()
@@ -1558,7 +1575,10 @@ pub fn cmd_cell_close(camp: &mut Campaign, args: &Args) -> Out {
 
 pub fn cmd_review_record(camp: &mut Campaign, args: &Args) -> Out {
     let name = args.pos(0);
-    let review = read_json(&crate::paths::normalise(args.pos(1)), None)?;
+    let review = read_json(
+        &crate::paths::normalise(&crate::jsonio::os_text(args.pos(1))),
+        None,
+    )?;
     let Value::Object(review) = review else {
         return Err(PmError::usage("the review must be a JSON object"));
     };
@@ -1781,7 +1801,8 @@ pub fn cmd_hitl_answer(camp: &mut Campaign, args: &Args) -> Out {
 }
 
 pub fn cmd_event(camp: &mut Campaign, args: &Args) -> Out {
-    let data = crate::jsonio::parse(args.pos(0)).map_err(|e| match e {
+    // the argument is held text; the decoder reads its real characters
+    let data = crate::jsonio::parse(&crate::jsonio::os_text(args.pos(0))).map_err(|e| match e {
         crate::jsonio::JsonError::Decode(text) => {
             PmError::usage(format!("the event is not JSON ({text})"))
         }
@@ -1849,7 +1870,7 @@ pub fn cmd_brief(camp: &mut Campaign, args: &Args) -> Out {
     out.insert("metrics".into(), Value::Object(metrics));
     out.insert(
         "write_to".into(),
-        Value::from(camp.dir.join("briefing.md").display().to_string()),
+        Value::from(crate::jsonio::path_text(&camp.dir.join("briefing.md"))),
     );
     Ok(out)
 }

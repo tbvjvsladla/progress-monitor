@@ -549,10 +549,10 @@ fn parse(argv: &[String]) -> Result<Parsed, ParseEnd> {
 /// surrogate) ends like the baseline's uncaught `UnicodeEncodeError`: nothing on
 /// stdout, a traceback on stderr, exit 1. Returns the exit code to use.
 fn print_json(result: &Obj, code: i32) -> i32 {
-    let text = pretty(&Value::Object(result.clone()));
-    if let Err(err) = crate::jsonio::encodable(&text) {
-        return uncaught(&err);
-    }
+    let text = match crate::jsonio::encode(&pretty(&Value::Object(result.clone()))) {
+        Ok(text) => text,
+        Err(err) => return uncaught(&err),
+    };
     let mut out = std::io::stdout().lock();
     let _ = writeln!(out, "{text}");
     let _ = out.flush();
@@ -596,7 +596,12 @@ pub fn main(argv: &[String]) -> i32 {
         .executor
         .clone()
         .filter(|e| !e.is_empty())
-        .or_else(|| std::env::var("PM_EXECUTOR").ok().filter(|e| !e.is_empty()))
+        .or_else(|| {
+            std::env::var("PM_EXECUTOR")
+                .ok()
+                .filter(|e| !e.is_empty())
+                .map(|e| crate::jsonio::mark(&e))
+        })
         .unwrap_or_else(|| "unknown".to_string());
     let paths = match Paths::discover() {
         Ok(p) => p,
@@ -608,7 +613,7 @@ pub fn main(argv: &[String]) -> i32 {
         }
     };
     let base_path: PathBuf = match &parsed.campaigns {
-        Some(text) => normalise(text),
+        Some(text) => normalise(&crate::jsonio::os_text(text)),
         None => match std::env::var("PM_CAMPAIGNS_DIR")
             .ok()
             .filter(|e| !e.is_empty())

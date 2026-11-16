@@ -153,7 +153,7 @@ pub fn cmd_init(base: &Path, paths: &Paths, harness: &str, apply: bool) -> Res<O
     Ok(obj([
         ("ok", Value::Bool(true)),
         ("mode", Value::from(if apply { "apply" } else { "dry-run" })),
-        ("root", Value::from(paths.repo.display().to_string())),
+        ("root", Value::from(crate::jsonio::path_text(&paths.repo))),
         ("campaigns", Value::from(shown(paths, base))),
         ("created", Value::Array(created)),
         ("kept", Value::Array(kept)),
