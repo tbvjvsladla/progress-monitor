@@ -432,14 +432,12 @@ attempt 2(c10 회차 1·2, c11 회차 1 반영 뒤 트리) 자기 확인:
 - `src/campaign.rs`: `budget_value` 위에 겹친 rustdoc을 한 줄로, `budget`에 사용 계약 한 줄(c10 회차 4 비차단 지적). 이 파일 c10 절의 `timedelta_us` 언급을 진입점 `timedelta_of`로 바로잡았다.
 - 훅 조각은 release `pm init` dry-run 출력과 글자 단위로 대조했다(Claude `"${CLAUDE_PROJECT_DIR}/.claude/skills/progress-monitor/target/release/pm" stop-hook --harness claude`, Codex는 `src/init.rs`의 같은 형식).
 
-### 남은 것
-
-- 원본 `.py` 7파일(`scripts/` 다섯, `tests/test_pm.py`, `tests/test_package.py`)의 `git rm`과 그 뒤 `PACKAGE_MANIFEST.json` 재생성. 수행 세션의 권한 판정이 삭제를 막아 사람의 확인을 기다린다.
+- 원본 `.py` 7파일(`scripts/` 다섯, `tests/test_pm.py`, `tests/test_package.py`)을 지웠다(사람의 확인 뒤 `git rm`). `PACKAGE_MANIFEST.json`을 `target/release/package_manifest`로 다시 만들었다(70 files).
 
 ### 검사
 
-- release 빌드, `cargo fmt --check` 통과. `check_campaign` 틀 검사 findings 없음, `smoke_install` `SMOKE-PASS`, `sanitize_check` `SANITIZE OK (0 hits)`.
-- `cargo test --locked`: MANIFEST 재생성 전에는 `manifest_matches_tree`만 실패, 재생성 뒤 다시 본다.
-- no-python: `.py` 7파일과 MANIFEST의 그 항목 7줄 밖에는 걸리는 줄이 없다.
+- release 빌드, `cargo fmt --check` 통과. `check_campaign` 틀 검사 findings 없음, `smoke_install` `SMOKE-PASS`, `sanitize_check` `SANITIZE OK (0 hits)`, `package_manifest --check` `MANIFEST OK (70 files)`.
+- `cargo test --locked --no-fail-fast`: 전부 통과.
+- no-python: `git ls-files '*.py'`가 비고, PORTING.md 밖에 걸리는 줄이 없다(`NO-PY-OK`).
 
-판정: **INCOMPLETE** (`.py` 삭제와 최종 MANIFEST 재생성 대기).
+판정: **COMPLETE** (`.py` 삭제, 문서·설정 갱신, 버전 2.0.0, MANIFEST 재생성, PORTING.md).

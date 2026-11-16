@@ -9,7 +9,7 @@
     ".cache",
     "target"
   ],
-  "file_count": 77,
+  "file_count": 70,
   "files": [
     {
       "path": ".gitattributes",
@@ -43,9 +43,9 @@
     },
     {
       "path": "PORTING.md",
-      "bytes": 61546,
+      "bytes": 61556,
       "mode": "0644",
-      "sha256": "8b45c0f3b6fe80ebd60f5408ce2c324d8ca7983681cdb60ddc1588fd498fc956"
+      "sha256": "69a3c2cf5b4b5d2d43bd7397b1686aeb19ccaeaea137fdcfe55205598918ffc6"
     },
     {
       "path": "README.md",
@@ -214,36 +214,6 @@
       "bytes": 9944,
       "mode": "0644",
       "sha256": "55041c590845da1179573a901fde0b075850911631324a1b151312f08394e728"
-    },
-    {
-      "path": "scripts/check_campaign.py",
-      "bytes": 46412,
-      "mode": "0755",
-      "sha256": "ac645bddff0fcd41602089e6d23b46a5daea374b357cef3fb7e8456aa7f2062e"
-    },
-    {
-      "path": "scripts/package_manifest.py",
-      "bytes": 3566,
-      "mode": "0755",
-      "sha256": "409f8c1a5d2a2ae5ed2dc27e091693b54bf17f0cbcbc2f2f4109dced2e59b2a5"
-    },
-    {
-      "path": "scripts/pm.py",
-      "bytes": 88508,
-      "mode": "0755",
-      "sha256": "67a57cb19bc9bf2761d98d780ba58884850a614444fc9770ec4cabdedb94f01a"
-    },
-    {
-      "path": "scripts/sanitize_check.py",
-      "bytes": 2249,
-      "mode": "0755",
-      "sha256": "a02f9e06dda42dbad782555be3d06c87ebebb84dcb3b4707f49dd673a3580321"
-    },
-    {
-      "path": "scripts/smoke_install.py",
-      "bytes": 8538,
-      "mode": "0755",
-      "sha256": "daa0dcf8c303419d50e39f8fa8cdbac87034f96db5f0427622a861756752ffab"
     },
     {
       "path": "src/bin/check_campaign.rs",
@@ -454,18 +424,6 @@
       "bytes": 16679,
       "mode": "0644",
       "sha256": "464c45d1fb1b345e7eb8d38533ab92ad4c988f87b9dfd1188900f94ae51c9eb7"
-    },
-    {
-      "path": "tests/test_package.py",
-      "bytes": 7672,
-      "mode": "0644",
-      "sha256": "69f4b82217a3f0d886907b3a79e88052aae2d169f2beda309e2c0dc28c6cda66"
-    },
-    {
-      "path": "tests/test_pm.py",
-      "bytes": 50105,
-      "mode": "0644",
-      "sha256": "3457963ab3a5433e6b518a77bde35ccc811e0b03522fdbda267c7ae2d3f4d298"
     },
     {
       "path": "tests/transitions.rs",
