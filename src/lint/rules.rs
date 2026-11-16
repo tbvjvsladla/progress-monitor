@@ -10,23 +10,13 @@ use super::{
     os_name, parse_json, read_text, read_utf8, sorted_entries, suffix, text_of, Findings,
     LintError, LintResult, DEFAULT_AUTO_CELLS, PLACEHOLDER, POINTER_KEYS, SKELETON_CELL, STATES,
 };
-use crate::py::{is_int, number_text, py_eq, py_repr, py_str, repr_str, splitlines, truthy};
+use crate::py::{
+    is_int, number_text, py_eq, py_repr, py_str, repr_str, splitlines, truthy, type_name, Num,
+};
 use crate::time::{parse_time_detail, Moment, Parsed};
 use crate::{FINAL, SECTIONS, SUFFIX, TOOL};
 
 type Obj = Map<String, Value>;
-
-fn type_name(value: &Value) -> &'static str {
-    match value {
-        Value::Null => "NoneType",
-        Value::Bool(_) => "bool",
-        Value::Number(n) if n.is_f64() => "float",
-        Value::Number(_) => "int",
-        Value::String(_) => "str",
-        Value::Array(_) => "list",
-        Value::Object(_) => "dict",
-    }
-}
 
 /// A value a set can hold; a list or object stops the run as the baseline's TypeError did.
 fn hashable(value: &Value) -> LintResult<&Value> {
@@ -53,8 +43,17 @@ impl ValueSet {
 
     fn contains(&self, value: &Value) -> LintResult<bool> {
         let value = hashable(value)?;
-        Ok(self.0.iter().any(|v| py_eq(v, value)))
+        Ok(self.0.iter().any(|v| same_or_eq(v, value)))
     }
+}
+
+/// Set membership as the baseline saw it: identity first, then `==`. Every JSON
+/// `NaN` the baseline read was the decoder's one NaN object, so two NaN values match.
+fn same_or_eq(a: &Value, b: &Value) -> bool {
+    let nan = |v: &Value| {
+        matches!(v, Value::Number(_)) && Num::of(v).is_some_and(|n| n.as_f64().is_nan())
+    };
+    (nan(a) && nan(b)) || py_eq(a, b)
 }
 
 fn set_of<'a>(values: impl IntoIterator<Item = &'a Value>) -> LintResult<ValueSet> {
@@ -691,15 +690,14 @@ fn check_auto_cap(decl: &Obj, events: &[Obj], add: &mut Findings) -> LintResult<
     let autos = entries(decl, "cells")
         .filter(|e| e.get("origin").and_then(Value::as_str) == Some("auto"))
         .count() as i128;
+    let Some(limit) = Num::of(budget) else {
+        return Ok(());
+    };
     let Value::Number(number) = budget else {
         return Ok(());
     };
-    let limit = number
-        .as_i64()
-        .map(i128::from)
-        .or_else(|| number.as_u64().map(i128::from))
-        .unwrap_or(i128::MAX);
-    if autos > limit + allowed {
+    // `autos > budget + allowed` exactly; an int beyond i128 goes on as a float.
+    if Num::Int(autos).gt(limit.plus(Num::Int(allowed))) {
         add.add(
             "auto-cap-exceeded",
             "campaign.json",
@@ -1059,6 +1057,94 @@ mod tests {
                 vec![format!("{line} {message}")],
                 "{utc}"
             );
+        }
+    }
+
+    /// Set one key of `campaign.json` from raw JSON text.
+    fn set_declared(instance: &Path, pointer: &[&str], raw: &str) {
+        let path = instance.join("campaign.json");
+        let mut decl = jsonio::parse(&fs::read_to_string(&path).unwrap())
+            .ok()
+            .unwrap();
+        let mut slot = &mut decl;
+        for key in pointer {
+            slot = &mut slot[*key];
+        }
+        *slot = jsonio::parse(raw).ok().unwrap();
+        fs::write(&path, jsonio::compact(&decl)).unwrap();
+    }
+
+    /// Review round 2 (r2-3): `isinstance(cap, int) and cap >= 1` for every int size.
+    #[test]
+    fn round_cap_is_a_positive_int_of_any_size() {
+        for (raw, ok) in [
+            ("-100000000000000000000", false),
+            ("-9223372036854775809", false),
+            ("-170141183460469231731687303715884105729", false),
+            ("-1e20", false),
+            ("0", false),
+            ("-0", false),
+            ("1.0", false),
+            ("true", false),
+            ("NaN", false),
+            ("1", true),
+            ("100000000000000000000000000000000000000000", true),
+        ] {
+            let (root, instance) = valid_instance();
+            set_declared(&instance, &["review", "round_cap"], raw);
+            let verdict = check(&instance, &root, false);
+            fs::remove_dir_all(&root).unwrap();
+            match verdict {
+                Ok(_) => assert!(ok, "{raw} passed"),
+                Err(LintError::Unreadable(m)) => {
+                    assert!(!ok, "{raw}: {m}");
+                    assert_eq!(
+                        m,
+                        "campaign.json: review.round_cap must be a positive integer"
+                    );
+                }
+                Err(_) => panic!("{raw}: not an unreadable declaration"),
+            }
+        }
+    }
+
+    /// `autos > budget + allowed` exactly, whatever the int size.
+    #[test]
+    fn auto_cell_budget_of_any_int_size() {
+        for (raw, exceeded) in [
+            ("-100000000000000000000", true),
+            ("-170141183460469231731687303715884105729", true),
+            ("-1", true),
+            ("100000000000000000000000000000000000000000", false),
+            ("NaN", false),
+            ("-1e20", false),
+        ] {
+            let (root, instance) = valid_instance();
+            set_declared(&instance, &["budgets", "auto_cells"], raw);
+            let rules: Vec<&str> = findings(&root, &instance)
+                .into_iter()
+                .map(|f| f.rule)
+                .collect();
+            assert_eq!(rules.contains(&"auto-cap-exceeded"), exceeded, "{raw}");
+        }
+    }
+
+    /// Every JSON NaN the baseline read was one object, so set membership matched it.
+    #[test]
+    fn nan_matches_itself_in_a_set_and_is_a_float() {
+        let nan = jsonio::parse("NaN").ok().unwrap();
+        let set = set_of([&nan]).ok().unwrap();
+        assert!(set
+            .contains(&jsonio::parse("NaN").ok().unwrap())
+            .ok()
+            .unwrap());
+        assert!(!set.contains(&Value::from(0)).ok().unwrap());
+        for raw in ["NaN", "Infinity", "1e400"] {
+            let value = jsonio::parse(raw).ok().unwrap();
+            let Err(LintError::Internal(m)) = member_text("x", Some(&value)) else {
+                panic!("{raw}");
+            };
+            assert_eq!(m, "TypeError: argument of type 'float' is not iterable");
         }
     }
 }

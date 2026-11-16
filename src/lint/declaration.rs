@@ -9,7 +9,7 @@ use serde_json::Value;
 use super::{
     blank, load_json, LintError, LintResult, CELL_STATES, DECLARATION_TEXT, ORIGINS, PLACEHOLDER,
 };
-use crate::py::{is_int, is_plain_name, py_eq, py_repr, py_str, repr_str};
+use crate::py::{is_int, is_plain_name, py_eq, py_repr, py_str, repr_str, Num};
 use crate::{REVIEW, SCHEMA};
 
 fn unreadable(message: impl Into<String>) -> LintError {
@@ -66,7 +66,8 @@ pub fn read_declaration(target: &Path) -> LintResult<Value> {
         .get("review")
         .and_then(Value::as_object)
         .and_then(|r| r.get("round_cap"));
-    let cap_ok = cap.is_some_and(|c| is_int(c) && c.as_i64().is_none_or(|n| n >= 1));
+    // `isinstance(cap, int) and cap >= 1`, exact for any int size.
+    let cap_ok = cap.is_some_and(|c| is_int(c) && Num::of(c).is_some_and(|n| n.ge(Num::Int(1))));
     if !cap_ok {
         return Err(unreadable("review.round_cap must be a positive integer"));
     }

@@ -166,6 +166,15 @@ prepare 계획대로 `src/lint/{mod,declaration,rules,control,cli}.rs`로 나눴
   - 임시 폴더: 기준선 `tempfile.gettempdir()`처럼 `TMPDIR`, `TEMP`, `TMP`, `/tmp`, `/var/tmp`, `/usr/tmp`, 작업 폴더 순으로 새 파일을 만들고 쓸 수 있는 첫 폴더를 쓴다(`control::temp_base`). 없으면 `FileNotFoundError: ... No usable temporary directory found in [...]`, exit 1.
 - 오케스트레이터 지시(공용 `src/time.rs`): `timedelta_us`의 C int 넘침 오류 문구를 이스케이프로 조립하던 것을 런타임 이름 없는 `OverflowError: int too large to convert to C int`로 바꿨다. 오류 문구이므로 의도한 변경 7이다. 소스에서 검사를 피하려는 이스케이프·문자열 조립을 쓰지 않는다. c10 절 r1-K6의 문구 인용은 기준선 쪽 문구다.
 
+### 회차 2 검토 반영(`temp/pm-rust-261116/review/c11-r2.json`, attempt 3)
+
+- r2-3: `review.round_cap`은 기준선 `isinstance(cap, int) and not bool and cap >= 1`과 같게 `is_int` + `Num::of(cap).ge(Num::Int(1))`(c10 `py::Num`, 정수는 i128로 정확히, 그 밖은 float로 비교)로 판정한다. i64 밖의 큰 음수(`-100000000000000000000` 등)가 통과하던 것을 고쳤다. 시험 `lint::rules::tests::round_cap_is_a_positive_int_of_any_size`.
+- 숫자 판정 전체 점검(c10 숫자 점검 규칙: 검사 연산, i64 포화 금지, NaN·Infinity·-0). lint의 숫자 판정은 `schema_version`(느슨한 같음), `round_cap`, `budgets.auto_cells` 셋이다. 다른 budgets 값은 lint가 보지 않는다.
+  - `auto-cap-exceeded`: 한도를 `as_i64`/`as_u64` 밖이면 `i128::MAX`로 포화하던 것을 `Num::Int(autos).gt(budget.plus(Num::Int(allowed)))`로 바꿨다. i64 밖의 큰 음수 한도가 기준선처럼 finding을 낸다. 시험 `auto_cell_budget_of_any_int_size`.
+  - 집합 소속(`ValueSet`: check·group·cell 이름, hitl id, gate 결과의 check): 기준선 `in`은 동일성 먼저다. 기준선 디코더의 `NaN`은 한 객체이므로 NaN id끼리 맞는다(`same_or_eq`). hitl id가 `NaN`인 허용 답이 한도를 올리지 못하던 것을 고쳤다.
+  - TypeError 문구의 타입 이름: lint 안의 `type_name`(serde `is_f64`, `NaN`·`Infinity`·`1e400`을 `int`로 냄)을 버리고 c10 `py::type_name`을 쓴다(`argument of type 'float' is not iterable`). 시험 `nan_matches_itself_in_a_set_and_is_a_float`.
+- 값 집합 대조: 32개 값(크기별 정수, i64·u64·i128 경계, `-1e20`, `1.0`, `-0`, `-0.0`, `NaN`, `±Infinity`, `±1e400`, bool, null, 문자열, 목록, 객체) × 5개 판정(`round_cap`, `schema_version`, `auto_cells`, hitl id, gate `members`·check 이름) = 160건. 기준선과 stdout 바이트·종료 코드(exit 1이면 마지막 오류 문구까지) 비교. 고치기 전 바이너리 same=146 diff=14, 고친 뒤 same=160 diff=0. 도구와 기록은 캠페인 쪽 `campaigns/pm-rust-261116/cells/c11-lint/evidence/r3/`(`numbers.sh`, `numbers.before.log`, `numbers.after.log`).
+
 ### 알려진 차이
 
 없음(의도한 변경 1·2·7만). `PM_PROJECT_ROOT`의 값이 UTF-8이 아닐 때는 c10 `paths::project_root`의 처리를 따른다.
@@ -179,12 +188,13 @@ prepare 계획대로 `src/lint/{mod,declaration,rules,control,cli}.rs`로 나눴
 | 빌드 | `cargo build --locked`, `cargo build --release --locked` | 0 | 통과 |
 | 형식 | `cargo fmt --check` | 0 | 통과(자기 확인) |
 | clippy | `cargo clippy --all-targets --locked -- -D warnings` | 0 | 통과(자기 확인) |
-| 단위 시험 | `cargo test --locked --lib` | 0 | 26건 통과(이 cell 몫: 접미 규칙, blank, 구성요소 순 정렬, 이름 이스케이프 왕복, 인자 파서, 깊은 자리표시 순회, NaN 선언, journey 시각 수용·거절) |
+| 단위 시험 | `cargo test --locked --lib` | 0 | 33건 통과(이 cell 몫: 접미 규칙, blank, 구성요소 순 정렬, 이름 이스케이프 왕복, 인자 파서, 깊은 자리표시 순회, NaN 선언, journey 시각 수용·거절, round_cap·auto_cells 정수 크기, NaN 집합 소속·타입 이름) |
 | 기준선 대조 | `sh temp/pm-rust-261116/c11-lint-cmp/compare.sh $PWD/target/release/check_campaign` | 0 | same=98 diff=0 |
 | 추가 대조 | NaN·Infinity·큰 정수·서로게이트·깊은 중첩(선언·상태·journey·`.json`, 9996/9997/12000단, 5000자리 정수), journey 시각 33개, 자리표시 순회 수준 993~3000, UTF-8 아닌 파일·폴더·phase 파일·인자·선언 이름·pointer, `TMPDIR` 4가지 | 각 경우 기준선과 같음 | 전부 같음 |
+| 숫자 값 집합 대조 | `sh campaigns/pm-rust-261116/cells/c11-lint/evidence/r3/numbers.sh $PWD/target/release/check_campaign <작업 폴더>` | 0 | same=160 diff=0 |
 | 오라클 | `PM_BIN=target/release/pm PM_LINT_BIN=target/release/check_campaign python3 -B -m unittest discover -s temp/pm-rust-261116/oracle` | 0 | `Ran 50 tests ... OK` |
 
-판정: **COMPLETE** (`scripts/check_campaign.py`의 모든 규칙·자체검사·CLI, 회차 1 차단 지적 K2·K7·B1 반영). `tests/*.rs` 이식(c12), 패키지 도구(c20), `.py` 삭제·문서(c21)는 다른 cell의 몫이다.
+판정: **COMPLETE** (`scripts/check_campaign.py`의 모든 규칙·자체검사·CLI, 회차 1 차단 지적 K2·K7·B1과 회차 2 차단 지적 r2-3·숫자 판정 점검 반영). `tests/*.rs` 이식(c12), 패키지 도구(c20), `.py` 삭제·문서(c21)는 다른 cell의 몫이다.
 
 ## c12-tests — `tests/test_pm.py` → `tests/*.rs`
 

@@ -43,9 +43,9 @@
     },
     {
       "path": "PORTING.md",
-      "bytes": 48871,
+      "bytes": 51337,
       "mode": "0644",
-      "sha256": "ce6433d03b7e2f7d7b99cd4d818608225ee7fc3a25fcc8a838816e7da87f2ffc"
+      "sha256": "68b3c431c48399b688ed467c16869868995f1fba48270cb21c42390ab6f8dbf2"
     },
     {
       "path": "README.md",
@@ -349,9 +349,9 @@
     },
     {
       "path": "src/lint/declaration.rs",
-      "bytes": 6911,
+      "bytes": 6996,
       "mode": "0644",
-      "sha256": "242c51bc5ef58cb168ae99ab1ba04f7c2b35efa0ed8adf3a07e2a1fddd92db92"
+      "sha256": "9ddfac6efec26a50ce450840366ef00d22a62dba3bfb1f4eb2bab8630260ec87"
     },
     {
       "path": "src/lint/mod.rs",
@@ -361,9 +361,9 @@
     },
     {
       "path": "src/lint/rules.rs",
-      "bytes": 37227,
+      "bytes": 40734,
       "mode": "0644",
-      "sha256": "919675172c4f86c0b807f4292693f22ff6514444db6b105ed91962fada99cf40"
+      "sha256": "1bd51e6c4db203e2c0477587bc1f55908acf904e8006d535a42660a5f0d6ab07"
     },
     {
       "path": "src/lock.rs",
