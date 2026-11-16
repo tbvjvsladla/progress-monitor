@@ -167,8 +167,35 @@ fn parse_clock(text: &[u8]) -> Option<(i64, i64, i64, i64)> {
     Some((h, m, s, micro))
 }
 
+/// How a timestamp text reads.
+#[derive(Clone, Copy, Debug)]
+pub enum Parsed {
+    /// Not an ISO 8601 time the baseline accepted.
+    Invalid,
+    /// A valid time without a time zone.
+    Naive,
+    Aware(Moment),
+}
+
 /// The baseline's `fromisoformat` after `Z` → `+00:00`; None without a time zone.
 pub fn parse_time(text: &str) -> Option<Moment> {
+    match parse_time_detail(text) {
+        Parsed::Aware(moment) => Some(moment),
+        Parsed::Invalid | Parsed::Naive => None,
+    }
+}
+
+/// Like [`parse_time`], telling an invalid text from one without a time zone.
+pub fn parse_time_detail(text: &str) -> Parsed {
+    match parse_iso(text) {
+        None => Parsed::Invalid,
+        Some(None) => Parsed::Naive,
+        Some(Some(moment)) => Parsed::Aware(moment),
+    }
+}
+
+/// None: invalid; Some(None): naive; Some(Some(moment)): with a time zone.
+fn parse_iso(text: &str) -> Option<Option<Moment>> {
     let text = text.replace('Z', "+00:00");
     let bytes = text.as_bytes();
     let (y, mo, d, date_len) = if bytes.get(4) == Some(&b'-') {
@@ -197,7 +224,7 @@ pub fn parse_time(text: &str) -> Option<Moment> {
         return None;
     }
     if bytes.len() <= date_len {
-        return None; // a date alone has no time zone
+        return Some(None); // a date alone has no time zone
     }
     // one separator character (any), then the time
     let sep_len = text[date_len..].chars().next()?.len_utf8();
@@ -205,7 +232,7 @@ pub fn parse_time(text: &str) -> Option<Moment> {
     let tz_at = rest.iter().position(|b| *b == b'+' || *b == b'-');
     let Some(tz_at) = tz_at else {
         parse_clock(rest)?;
-        return None; // naive
+        return Some(None); // naive
     };
     let (h, mi, s, us) = parse_clock(&rest[..tz_at])?;
     let sign: i64 = if rest[tz_at] == b'-' { -1 } else { 1 };
@@ -215,10 +242,10 @@ pub fn parse_time(text: &str) -> Option<Moment> {
         return None;
     }
     let local = days_from_civil(y, mo, d) * US_PER_DAY + ((h * 60 + mi) * 60 + s) * US_PER_SEC + us;
-    Some(Moment {
+    Some(Some(Moment {
         utc_us: local - offset,
         offset_us: offset,
-    })
+    }))
 }
 
 fn parse_offset(text: &[u8]) -> Option<(i64, i64, i64, i64)> {
@@ -275,6 +302,16 @@ mod tests {
         assert!(parse_time("2026-11-16").is_none());
         assert!(parse_time("nope").is_none());
         assert!(parse_time("2026-02-30T00:00:00+00:00").is_none());
+        assert!(matches!(
+            parse_time_detail("2026-11-16T03:04:05"),
+            Parsed::Naive
+        ));
+        assert!(matches!(parse_time_detail("2026-11-16"), Parsed::Naive));
+        assert!(matches!(parse_time_detail("nope"), Parsed::Invalid));
+        assert!(matches!(
+            parse_time_detail("2026-11-16T03:04:05Z"),
+            Parsed::Aware(_)
+        ));
         assert_eq!(
             stamp(parse_time("1970-01-01 00:00:00.5-01:30").unwrap()),
             "1970-01-01T00:00:00.500000-01:30"

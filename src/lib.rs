@@ -19,6 +19,7 @@ pub mod error;
 pub mod hook;
 pub mod init;
 pub mod jsonio;
+pub mod lint;
 pub mod lock;
 pub mod paths;
 pub mod proc;

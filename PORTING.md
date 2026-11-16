@@ -61,3 +61,55 @@ prepare 계획(`commands/` 하위 폴더, `consts.rs`, `gates.rs`)보다 파일 
 - 직접 대조(합성 인스턴스, 53단계: open·phase·gate·review·cell add/move/cancel/stop/resume·hitl·event·brief·metrics·explore·check run/invalidate·final·monitor reset·오류 경로, 단계마다 codex stop-hook): 시각·pid·소요 시간·실행 명령 경로를 가린 뒤 stdout·종료 코드·인스턴스 파일이 모두 같고, 다른 곳은 `event nope`의 JSON 오류 괄호 문구 하나(의도한 변경 7). `init` 출력의 차이는 훅 명령과 "틀 검사:" 줄(의도한 변경 1)뿐.
 
 판정: **COMPLETE** (`scripts/pm.py`의 모든 명령). `check_campaign` 등 나머지 바이너리와 `tests/*.rs`는 다른 cell(c11·c12·c20)의 몫이다.
+
+## c11-lint — `scripts/check_campaign.py` → `src/lint/` + `src/bin/check_campaign.rs`
+
+### 원본 → Rust 대응
+
+| 원본(`scripts/check_campaign.py`) | Rust |
+|---|---|
+| `SKILL_DIR`, `project_root`, `ROOT`, `PACKAGE_TEMPLATE`, `default_template` | `paths::Paths::discover`(c10) + `lint::cli::default_template` |
+| 상수 `PLACEHOLDER`, `SKELETON_CELL`, `STATES`, `CELL_STATES`, `ORIGINS`, `POINTER_KEYS`, `DECLARATION_TEXT`, `RULES`, `DEFAULT_AUTO_CELLS` | `src/lint/mod.rs`. `SECTIONS`·`REVIEW`·`SUFFIX`·`SCHEMA`·`TOOL`·`FINAL`은 `lib.rs`의 것 |
+| `NAME` 정규식 | `py::is_plain_name` |
+| `Unreadable`, 처리하지 않은 예외 | `lint::LintError::{Unreadable, Internal}` (exit 2 + JSON / exit 1 + stderr 한 줄) |
+| `blank`, `load_json` | `lint::blank`, `lint::load_json`(+ `read_text`, `read_utf8`) |
+| `read_declaration` | `src/lint/declaration.rs` |
+| `check_phase_file` … `check_gates`, `read_events`, `json_values`, `check` | `src/lint/rules.rs`(같은 이름, `json_values` → `holds_placeholder`, `add` → `Findings::add`). 공개 진입점 `progress_monitor::lint::check` |
+| `Path.rglob("*")` + `sorted`, `iterdir`/`glob` + `sorted` | `lint::files_below`(구성요소 순 정렬, 숨김 포함, 디렉터리 링크 안으로 들어가지 않음), `lint::sorted_entries` |
+| `write_json`, `edit_json`, `build_valid_instance`, `control_cases`, `instance_states`, `instance_contents`, `negative_control`, `tempfile.TemporaryDirectory`, `shutil.copytree` | `src/lint/control.rs`(`Case{name, rule, seed}` 목록, `ScratchDir`(Drop에서 삭제), `copy_tree`) |
+| `argparse` + `main` | `src/lint/cli.rs`(`parse`, `main`, `HELP`), 진입점 `src/bin/check_campaign.rs` |
+| `datetime.fromisoformat` 판정 | `time::parse_time_detail` → `Parsed::{Invalid, Naive, Aware}`(c10 `time.rs`에 더함. `parse_time`은 그 위의 래퍼로 동작 불변) |
+
+prepare 계획대로 `src/lint/{mod,declaration,rules,control,cli}.rs`로 나눴다.
+
+### 보존한 특이 동작
+
+- 규칙 id 18개, 검사 순서(= findings 순서), 메시지 문자열, 종료 코드 0/1/2, 출력 키 순서(`status, negative_control, mode, target, findings`와 `--list-control`의 `status, valid_instance_states, valid_instance, rules, cases, problems`).
+- 음성 대조를 대상 검사보다 먼저 항상 돌린다. 대조 case 33개 + `unfilled-copy` + `template-defect`, 원본 순서. 모드는 경로로만 정한다(`--template` 또는 해석한 기본 템플릿·패키지 템플릿과 같은 경로).
+- `placeholder-left` 순회: 숨김 파일 포함, 디렉터리 심볼릭 링크 안으로는 들어가지 않고 링크된 파일은 센다, 경로 구성요소 순 정렬(`a/x` < `a-b/x`), `logs/`로 시작하는 상대 경로 건너뜀, UTF-8이 아닌 파일 건너뜀, `.json` 접미(`Path.suffix` 규칙, `.json`이라는 이름 자체는 접미 없음)는 `_` 키 밖 문자열만 본다.
+- Python 값 의미: `schema_version`은 느슨한 같음(2.0 통과, `true` 실패), `is True`, bool을 뺀 int, `gate.members`가 문자열이면 부분 문자열·객체면 키 검사, `x or []`가 문자열이면 문자 단위(객체 없음), hitl id 비교의 `1 == 1.0 == True`.
+- 원본이 TypeError/UnicodeDecodeError로 죽는 입력(예: `needs: [{}]`, hitl `id`가 목록, `members: 7`, journey `cells: 5`, UTF-8이 아닌 `cell.md`)은 stdout 없이 exit 1로 같다.
+- `--root`·대상 경로는 비엄격 resolve, `target`은 root 기준 상대(같으면 `.`), 밖이면 절대 경로.
+
+### 의도한 변경 적용 지점
+
+1. 대조 fixture의 가상 검사 명령: `unit` `cargo test --locked`(영수증 `key.cmd` 같음), `unit-fast` `cargo test --locked fast`, `style` `tools/style.sh`(check-duplicate-command case 같음), check-duplicate-id `tools/other.sh`, phase `proof.check` `sh verify.sh`. 외부 출력에는 찍히지 않는다(`--list-control` 출력 바이트가 기준선과 같다).
+2. 스킬 폴더: `Paths::discover`(c10).
+7. CLI 문구: `--help` 본문은 새로 썼다(규칙 목록·모드·종료 코드 설명 유지, "pm program beside this one"). 사용법 오류는 stderr + exit 2, 약어 받지 않음. JSON `error`의 `not JSON (...)` 괄호 안은 serde 문구. 처리하지 않은 예외는 traceback 대신 stderr 한 줄(`check_campaign: error: ...`), exit 1은 같다.
+
+### 알려진 차이(지원 범위 밖)
+
+- c10과 같은 JSON 범위 차이(`NaN`/`Infinity`, u64 밖 정수, 고립 서로게이트, 128단계 넘는 중첩): 선언·상태 파일은 `not JSON`(exit 2), journey 줄은 "line is not JSON", 자리표시 검사의 `.json`은 JSON 아님으로 본다.
+- journey 시각은 c10 `parse_time`의 `fromisoformat` 부분집합으로 읽는다. 주 단위 날짜 등 바깥 형식은 판정이 갈릴 수 있다.
+- UTF-8이 아닌 파일 이름은 손실 변환한 이름으로 비교·출력한다.
+- 사용 가능한 임시 폴더를 고르는 규칙: `TMPDIR`(없으면 `/tmp`)만 쓴다(기준선 `tempfile`은 쓸 수 없으면 다른 후보로 넘어간다).
+
+### 검사
+
+- `cargo build --locked`, `cargo build --release --locked`: 통과.
+- `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`: 통과(자기 확인).
+- `cargo test --locked`: 단위 시험 12건 통과(이 cell 몫: 접미 규칙, blank, 구성요소 순 정렬, 인자 파서, `parse_time_detail`).
+- 기준선 대조 `temp/pm-rust-261116/c11-lint-cmp/compare.sh target/release/check_campaign`(같은 cwd·`PM_PROJECT_ROOT`, 스킬 경로만 가림): 98건 중 96건 stdout 바이트·종료 코드 같음. 다른 2건은 `not JSON (...)` 괄호 문구(의도한 변경 7). 대상: `--list-control`, 기본 템플릿, `--template` 강제, demo-campaign(`--root` 유무), 없는 경로·파일·빈 경로, val_agent 실제 인스턴스 3개와 템플릿, 대조 case 33개 사본, 순회(숨김·링크·정렬·`.json` 규칙·바이너리), journey 형식, cell.md 형태, phase·pointer·gate·선언 형태 40여 개, structure·auto-cap, exit 1 입력 6개, `PM_PROJECT_ROOT`.
+- 오라클(`PM_BIN=target/release/pm PM_LINT_BIN=target/release/check_campaign`): `Ran 50 tests ... OK`.
+
+판정: **COMPLETE** (`scripts/check_campaign.py`의 모든 규칙·자체검사·CLI). `tests/*.rs` 이식(c12), 패키지 도구(c20), `.py` 삭제·문서(c21)는 다른 cell의 몫이다.
