@@ -347,15 +347,14 @@ pub fn cmd_phase_close(camp: &mut Campaign, args: &Args) -> Out {
         fs::write(camp.dir.join(crate::jsonio::os_text(&log)), "").map_err(|e| PmError::os(&e))?;
         (log, attempt, check, expect)
     };
-    let timeout = camp.budget("check_timeout_s").as_f64();
+    let timeout = camp.budget_value("check_timeout_s");
     let root = camp.root.clone();
     let done = execute(
         &check,
         &root,
-        timeout,
+        &timeout,
         &camp.dir.join(crate::jsonio::os_text(&log)),
-    )
-    .map_err(|e| PmError::os(&e))?;
+    )?;
     let ok = done.error.is_none() && done.exit_code == Some(0) && done.output.contains(&expect);
     let state = {
         let _guard = camp.lock(None)?;

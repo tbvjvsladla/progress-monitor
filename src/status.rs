@@ -339,10 +339,9 @@ pub fn briefing_due(camp: &mut Campaign) -> Res<Obj> {
     };
     let mut by_hours = false;
     if let Some(hours @ Value::Number(_)) = briefing.get("every_hours") {
-        let hours = num(hours)?;
-        if hours.gt(Num::Int(0)) {
+        if num(hours)?.gt(Num::Int(0)) {
             if let Some(anchor) = anchor {
-                let budget = crate::time::timedelta_us(hours, 3_600_000_000)?;
+                let budget = crate::time::timedelta_of(hours, 3_600_000_000)?;
                 by_hours = i128::from(now().utc_us - anchor.utc_us) >= budget;
             }
         }

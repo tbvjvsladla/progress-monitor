@@ -15,7 +15,7 @@ use crate::paths::{join, Paths};
 use crate::proc::{git, node_name, probe};
 use crate::py::{
     as_list, as_obj, as_obj_mut, contains, eq_str, is_digits, is_int, is_plain_name, list_or_empty,
-    need, num, obj, opt_truthy, py_eq, py_str, repr_str, splitlines, Num, Obj,
+    need, obj, opt_truthy, py_eq, py_str, repr_str, splitlines, Num, Obj,
 };
 use crate::time::{now, parse_time, stamp, Moment};
 use crate::{FINAL, SCHEMA, SUFFIX};
@@ -185,18 +185,23 @@ impl Campaign {
     }
 
     /// A budget: the declared int (any size, bool excluded), else the default.
-    pub fn budget(&self, name: &str) -> Num {
+    /// The budget's value as declared when it is an int (not a bool), else the default.
+    pub fn budget_value(&self, name: &str) -> Value {
         let fallback = DEFAULT_BUDGETS
             .iter()
             .find(|(k, _)| *k == name)
-            .map_or(Num::Int(0), |(_, v)| Num::Int(i128::from(*v)));
+            .map_or(Value::from(0), |(_, v)| Value::from(*v));
         match self.decl.get("budgets") {
             Some(Value::Object(b)) => match b.get(name) {
-                Some(v) if is_int(v) => Num::of(v).unwrap_or(fallback),
+                Some(v) if is_int(v) => v.clone(),
                 _ => fallback,
             },
             _ => fallback,
         }
+    }
+
+    pub fn budget(&self, name: &str) -> Num {
+        Num::of(&self.budget_value(name)).unwrap_or(Num::Int(0))
     }
 
     pub fn phases(&self) -> Vec<String> {
@@ -562,9 +567,7 @@ impl Campaign {
         }
         let zero = Value::from(0);
         crate::py::py_sort(&mut found, |a, b| {
-            let x = num(a.get("n").unwrap_or(&zero))?;
-            let y = num(b.get("n").unwrap_or(&zero))?;
-            Ok(x.compare(y) == Some(std::cmp::Ordering::Less))
+            crate::py::py_lt(a.get("n").unwrap_or(&zero), b.get("n").unwrap_or(&zero))
         })?;
         Ok(found)
     }
@@ -717,21 +720,30 @@ impl Campaign {
     }
 
     // -- hitl bookkeeping
-    /// Every hand-over with its answer (the last answer event with the same id), or null.
+    /// Every hand-over with its answer, or null: the baseline's dict of answer
+    /// events by id (the last one wins, ids compared as dict keys, an unhashable
+    /// id its TypeError).
     pub fn hitls(&mut self) -> Res<Vec<Obj>> {
+        use crate::py::{hashable, same_or_eq};
         let events = self.events()?.clone();
-        let answers: Vec<&Obj> = events
+        let mut answers: Vec<(&Value, &Obj)> = Vec::new();
+        for e in events
             .iter()
             .filter(|e| eq_str(e.get("event"), "hitl-answer"))
-            .collect();
+        {
+            let id = hashable(e.get("id").unwrap_or(&Value::Null))?;
+            match answers.iter_mut().find(|(k, _)| same_or_eq(k, id)) {
+                Some(slot) => slot.1 = e,
+                None => answers.push((id, e)),
+            }
+        }
         let mut out = Vec::new();
         for e in events.iter().filter(|e| eq_str(e.get("event"), "hitl")) {
-            let id = e.get("id").cloned().unwrap_or(Value::Null);
+            let id = hashable(e.get("id").unwrap_or(&Value::Null))?;
             let answer = answers
                 .iter()
-                .rev()
-                .find(|a| py_eq(a.get("id").unwrap_or(&Value::Null), &id))
-                .map_or(Value::Null, |a| Value::Object((*a).clone()));
+                .find(|(k, _)| same_or_eq(k, id))
+                .map_or(Value::Null, |(_, a)| Value::Object((*a).clone()));
             let mut item = e.clone();
             item.insert("answer".into(), answer);
             out.push(item);

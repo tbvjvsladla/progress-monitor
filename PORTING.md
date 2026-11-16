@@ -12,6 +12,7 @@
 | `now`, `stamp`, `parse_time` | `src/time.rs`: `Moment { utc_us, offset_us }`, `stamp`, `parse_time`(Python 3.12 C 구현 `datetime.fromisoformat` 이식: 구분자 위치 규칙, ISO 주 날짜, `HH[:MM[:SS[.f]]]` 파서, 오프셋의 소수 초), `timedelta_us`(`timedelta(...)`의 정수·float 환산과 범위 오류) |
 | `read_json`, `write_json`, `json.dumps(...)` 세 형식, `hashlib.sha256` | `src/jsonio.rs`: `parse`(`json.loads` 이식, 오류 문구 포함), `read_json`, `write_json`, `pretty`(indent 2), `compact`(`", "`·`": "`), `sorted_compact`(재귀 키 정렬), `digest`, `encodable`(UTF-8 인코딩 실패 판정) |
 | Python 값 의미(truthiness, `==`, `isinstance(int)`, `str`/`repr`, `splitlines`, `strip`, `round`, `float` repr) | `src/py.rs` |
+| `sorted(...)`(인터프리터의 `list.sort`) | `src/sort.rs`: `list_sort`(3.12 timsort·powersort 병합을 단계 그대로) |
 | `alive`, `git`, `execute`, `Campaign.probe`의 subprocess | `src/proc.rs`: `alive`, `git`, `probe`, `execute`(`/bin/sh -c`, `setsid`, stdin null, stdout+stderr 한 로그, 시간 초과 시 `killpg(SIGKILL)`), `node_name` |
 | `Refused`, `Usage`, 그 밖 예외 | `src/error.rs`: `PmError::{Refused, Usage, Internal}` (exit 1 / 2 / 2) |
 | `Campaign.lock` | `src/lock.rs`: `take`, `LockGuard`(Drop에서 `LOCK_UN`) |
@@ -49,7 +50,7 @@ prepare 계획(`commands/` 하위 폴더, `consts.rs`, `gates.rs`)보다 파일 
 - r1-K3: `proc::capture_bytes`의 시간 제한이 자식 종료와 두 파이프 EOF를 함께 덮는다(`communicate(timeout)`). 초과면 자식만 죽이고 거둔다. git 시간 초과 문구는 `Command '[...]' timed out after 120 seconds`, 실행 실패는 `[Errno N] ...: 'git'`.
 - r1-K4: `env_probe`와 `git` 출력은 엄격한 UTF-8(stdout 먼저, stderr도)로 푼다. 실패는 기준선과 같은 `UnicodeDecodeError: 'utf-8' codec can't decode ...` 문구로 `ok:false`, exit 2.
 - r1-K5: `init`에서 `Usage` 밖의 오류(OS 오류)는 stdout 없이 stderr의 traceback 끝줄과 exit 1.
-- r1-K6: `timedelta(minutes=phase_minutes)`를 i128로 계산하고 기준선의 두 `OverflowError`(`days=N; must have magnitude <= 999999999`, `Python int too large to convert to C int`)를 같은 경계에서 낸다. `briefing.every_hours`의 float 환산(반올림 half-even)과 `inf`의 오류도 같은 함수(`time::timedelta_us`)를 쓴다.
+- r1-K6: `timedelta(minutes=phase_minutes)`를 i128로 계산하고 기준선의 두 `OverflowError`(`days=N; must have magnitude <= 999999999`, 기준선 문구 `Python int too large to convert to C int`, Rust는 런타임 이름을 뺀 문구)를 같은 경계에서 낸다. `briefing.every_hours`의 float 환산(반올림 half-even)과 `inf`의 오류도 같은 함수(`time::timedelta_us`)를 쓴다.
 - r1-K7: `parse_time`이 CPython 3.12 C 구현을 그대로 따른다(ISO 주 날짜, `05.+00:00`, 오프셋 앞 공백, 오프셋 소수 초와 `+00:00:00.5` → UTC, `YYYY-Www-HH` 모호성, 아무 구분자 1글자).
 - r1-K10: `PM_LOCK_WAIT_S`와 `--briefing-every-hours`를 `py::py_float`(Python `float(str)`: 유니코드 숫자·공백, 숫자 사이 밑줄, `inf`/`infinity`/`nan` 대소문자)로 읽는다.
 - r1-B2: `Paths::exe` 주석을 실행 파일 경로로 고쳤다.
@@ -73,14 +74,27 @@ prepare 계획(`commands/` 하위 폴더, `consts.rs`, `gates.rs`)보다 파일 
 - 정수 산술(r2-5, r2-7): `Num::plus`는 검사 연산이다. 합이 i128 밖이면 float로 넘긴다(의도한 변경 8의 3). `py::int_saturating`(i64 포화)은 없앴다. `Campaign::budget`·`allows`는 `Num`을 돌려주고, 상한 비교(`exec_retries`+1+허용, `forced_reruns_*`, `auto_cells`, `explore_*`, `stall_*`, `stop_block_cap`)는 모두 `Num`으로 한다.
 - 비교: `Num::compare`는 int와 float를 정확히 비교한다(`9007199254740993 > 9007199254740992.0`). NaN이 끼면 `ge`·`gt`가 거짓이다(기준선의 `>=`·`>`). 그래서 `retries`가 NaN이면 `phase retry`를 거절하지 않는다. 이전의 `num_cmp(..).unwrap_or(Equal)`는 NaN을 같음으로 봤다.
 - `review_round`: 기준선처럼 `max([int(review_base or 0)] + int·bool 회차)`의 값 자체를 돌려준다(첫 최대값, `round` 없는 review 이벤트는 0). `int()`는 `py::py_int`(float 절삭, NaN·무한대 오류, 문자열은 Unicode 숫자·공백·`_`·부호와 4300자리 한도, 오류 문구는 기준선). `cell add`의 `review_base`는 그 값이 참일 때 그대로 쓴다. `round_cap`은 bool이 아닌 int이고 `>= 1`인지 `Num`으로 본다.
-- `max`·`sorted`: 영수증 번호는 `py::py_max`(기준선 `max([n ...] + [0]) + 1`, `0.0`·NaN 순서 그대로), 영수증 정렬은 `py::py_sort`(64개 미만은 기준선 `list.sort`의 run 탐지와 이진 삽입을 그대로 따라 NaN이 있어도 같은 순서).
-- 시간 제한·마감(r2-1, r2-2): `proc::deadline_after`가 기준선 `monotonic() + t`의 행동을 따른다. NaN·무한대·`Instant`를 넘는 값은 마감 없음, 0 이하는 즉시(먼저 한 번 확인한 뒤). 검사 실행(`timeout_s`, `check_timeout_s`)과 잠금(`PM_LOCK_WAIT_S`)이 같이 쓴다. `phase_minutes`·`briefing.every_hours`는 기존 `time::timedelta_us`(기준선 `timedelta` 오류 포함)로 받고, 그 오류 문구를 `OverflowError: Python int too large to convert to C int`로 바로잡았다.
+- `max`·`sorted`: 영수증 번호는 `py::py_max`(기준선 `max([n ...] + [0]) + 1`, `0.0`·NaN 순서 그대로), 영수증 정렬은 `py::py_sort`(회차 4에서 크기와 상관없이 기준선 `list.sort` 전체를 따르게 바꿈, 아래 절).
+- 시간 제한·마감(r2-1, r2-2): `proc::deadline_after`가 기준선 `monotonic() + t`의 행동을 따른다. NaN·무한대·`Instant`를 넘는 값은 마감 없음, 0 이하는 즉시(먼저 한 번 확인한 뒤). 검사 실행(`timeout_s`, `check_timeout_s`)과 잠금(`PM_LOCK_WAIT_S`)이 같이 쓴다. `phase_minutes`·`briefing.every_hours`는 기존 `time::timedelta_us`(기준선 `timedelta` 오류 포함)로 받고, 그 오류 문구는 런타임 이름을 뺀 `OverflowError: int too large to convert to C int`다(의도한 변경 7, 회차 4에서 문자열 조립을 걷어냄).
 - float 출력(r2-6): `Value::from(f64)`를 쓰지 않는다(비유한 값이 `null`이 된다). `metrics`의 `seconds`·비율·`check_seconds`, gate·final 이벤트와 영수증의 `seconds`는 `py::float_value`로 쓴다(`Infinity`·`NaN` 포함). `metrics`의 `float()`는 1e308을 넘는 int에서 `OverflowError: int too large to convert to float`, 목록·객체에서 기준선 `TypeError` 문구다.
 - `float(str)`(r2-8): 127 미만 문자는 그대로 두고(그래서 `\x1c`–`\x1f`는 공백이 아니다) 앞뒤의 ASCII 공백만 벗긴다. 127 이상은 공백이면 `' '`, 십진 숫자면 숫자, 그 밖은 실패다(`--briefing-every-hours`, `PM_LOCK_WAIT_S`, `metrics`의 문자열 `seconds`).
 - `{:g}`(잠금 실패 문구): `py::g_format`이 유효숫자 6자리·지수 규칙(`-1e+20`, `-1.23457e+06`, `1e-07`, `nan`, `inf`)을 따른다. `repr`/`str`의 비유한 float는 `nan`·`inf`·`-inf`다(`py::float_str`, 로그 이름 같은 `str()` 자리).
 - `src/bin/pm.rs`(r2-4): 큰 스택 스레드를 만들지 못하면(예: `ulimit -v 400000`) 현재 스레드에서 그대로 실행한다. `pm --help`가 exit 0으로 도움말을 낸다.
 - 의도한 변경 8의 3이 닿는 모습: i128 밖으로 나가는 int 결과(`2**127-1`의 `attempt`에 `+1`, `int(1e300)`인 `review_base`의 다음 회차, `2**127`인 영수증 번호의 다음 번호)는 float 값과 문구(`1.7014118346046923e+38`, `1e+300`)다. i128 밖 정수끼리의 비교도 float여서 `2**127`과 `2**127+1`이 같다고 본다. 아래 대조에서 이런 사례 18건을 따로 셌다.
 - 회귀 시험: `py::float_tests::number_edges_as_baseline`, `py::float_tests::sort_follows_the_baseline_with_nan`.
+
+### 회차 4: 회차 3 검토 차단 지적의 해소 (attempt 5)
+
+`temp/pm-rust-261116/review/c10-r3.json`의 차단 5건을 고쳤다.
+
+- r3-AB1 `src/time.rs`: `INT_TOO_LARGE`를 문자열 조립 없이 런타임 이름 없는 `OverflowError: int too large to convert to C int`로 썼다(의도한 변경 7, 오류 문구). `src/`에 `concat!`이나 이스케이프로 금지 낱말을 만드는 곳이 없고, `pm`·`check_campaign` 바이너리에도 그 낱말이 없다.
+- r3-C1 `src/sort.rs`(새 모듈): 기준선 `list.sort`(3.12 listobject.c)를 단계 그대로 옮겼다. run 탐지, 최소 run(`merge_compute_minrun`)까지 이진 삽입, powersort 병합 정책(`powerloop`·`found_new_run`·`merge_force_collapse`), `gallop_left`·`gallop_right`, 적응형 `min_gallop`의 `merge_lo`·`merge_hi`. 비교가 일관되지 않아도(NaN) panic하지 않고 기준선과 같은 비교를 같은 순서로 해서 같은 결과를 낸다. 비교가 실패하면 그 오류로 끝난다. `py::py_sort`는 이 함수를 부른다.
+- r3-C2 `src/campaign.rs` `receipts()`: 정렬 키 `r.get("n", 0)`을 `py::py_lt`로 비교한다. 숫자(bool 포함)는 값, 문자열은 코드 포인트, 목록은 항목별(같음은 아래 `same_or_eq`, 처음 다른 쌍의 `<`, 다 같으면 길이)이고, 그 밖의 쌍은 기준선 문구 `TypeError: '<' not supported between instances of 'A' and 'B'`다.
+- r3-C3 `src/proc.rs` `execute`, `src/checks.rs` `timeout_of`, `src/commands.rs`(phase close의 proof): 시간 제한을 JSON 값으로 넘기고, 기준선 `Popen.wait(timeout)`처럼 명령을 띄운 뒤에 `py::seconds_of`로 읽는다. float로 바꿀 수 없는 int(1e308 초과)는 `OverflowError: int too large to convert to float`, 숫자가 아닌 값은 `TypeError: unsupported operand type(s) for +: 'float' and '<type>'`로 ok:false, exit 2이고, 띄운 명령은 기준선처럼 그대로 둔다. 예산은 `Campaign::budget_value`(선언된 int 값 그대로)로 읽는다. 같은 성격의 `phase_minutes`(stop-hook)·`briefing.every_hours`는 `time::timedelta_of`로 받아 i128 밖 int도 기준선처럼 C int 넘침 오류다(전에는 float 무한대 오류 문구였다). `PM_LOCK_WAIT_S`는 기준선도 `float()`를 거치므로 바뀐 것이 없다.
+- r3-C4 `src/campaign.rs` `hitls()`: 기준선의 `{id: 답}` dict를 그대로 따른다. 같은 id는 마지막 답이 이기고, id 비교는 `py::same_or_eq`(동일성 우선: JSON의 NaN은 디코더의 NaN 객체 하나라서 서로 같다), 목록·객체 id는 `TypeError: unhashable type`.
+- 같은 규칙으로 `py::py_eq`의 목록·객체 안 항목 비교를 `same_or_eq`로 바꿨다(기준선 컨테이너 비교는 동일성 우선이라 `[NaN] == [NaN]`이 참). 맨 위의 `NaN == NaN`은 그대로 거짓이다. check_campaign도 `py_eq`를 쓰므로 같이 적용된다.
+- 회귀 시험: `sort::tests`(일관된 순서에서 안정 정렬과 같음, NaN 70개 사례의 기준선 결과, 비교 실패), `py::tests::less_than_and_seconds_follow_the_baseline`, `time` 시험에 i128 밖 int.
+- 의도한 변경 8의 3이 float로 넘친 경우(1e308을 넘는 int, 대조의 BIG): `attempt`·`retries`·`review_base`·회차·`total_blocks` 등의 산술 결과가 `Infinity`/`-Infinity`로 쓰이고, 그 값끼리의 비교가 같음이 되어 `review` 회차가 받아들여지는 경우가 있다(기준선은 `round-out-of-order`). 영수증 번호가 BIG이면 기준선은 다음 로그 이름이 길어 `OSError: [Errno 36] File name too long`(exit 2)인데 Rust는 `inf.json` 영수증을 쓴다. 모두 i128 밖 정수의 산술·비교를 float로 하는 8의 3 안의 결과다(`evidence/r4/results.txt` run 3, 12건).
 
 ### 의도한 변경 8 (사용자 수용, 2026-11-16)
 
@@ -103,10 +117,10 @@ prepare 계획(`commands/` 하위 폴더, `consts.rs`, `gates.rs`)보다 파일 
 |---|---|---|
 | `cargo build --locked`, `cargo build --release --locked` | PASS | 0 |
 | `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings` (자기 확인) | PASS | 0 |
-| `cargo test --locked --no-fail-fast` (전체 92건, 단위 30건 포함) | PASS | 0 |
+| `cargo test --locked --no-fail-fast` (회차 4: 전체 99건, 단위 37건 포함) | PASS | 0 |
 | 오라클 `PM_BIN=target/release/pm PM_LINT_BIN=target/release/check_campaign` | PASS (Ran 50, OK) | 0 |
 | `keycmp.sh` | PASS (KEYCMP-OK) | 0 |
-| `package_manifest --check` (MANIFEST 재생성 후) | PASS (76 files) | 0 |
+| `package_manifest --check` (MANIFEST 재생성 후) | PASS (회차 4: 77 files) | 0 |
 | `fromisoformat` 자동 대조 30526건(기준선 Python 3.12.3 결과와 UTC·오프셋 비교) | PASS (불일치 0) | 0 |
 | `json.loads`/`json.dumps` 자동 대조 13373건(값 출력·오류 종류·`JSONDecodeError` 문구) | PASS (불일치 0) | 0 |
 | 검토 재현 K1·K2·K3·K4·K5·K6·K10을 기준선과 나란히 실행(stdout·exit·인스턴스 파일) | PASS (시각 외 같음) | 0 |
@@ -117,9 +131,14 @@ prepare 계획(`commands/` 하위 폴더, `consts.rs`, `gates.rs`)보다 파일 
 | 회차 2: 혼합 문자 시나리오 13단계(open, event 3건, cell add 2건, phase start/close, hitl open, status, metrics, brief, stop-hook)를 기준선과 나란히 실행, check_campaign 포함 | PASS (stdout·exit·인스턴스 파일이 시각·경로 외 같음) | 0 |
 | 회차 3: 숫자 대조 `evidence/r3/numdiff.py` — 숫자 필드 31곳(예산 11개, 단계 `attempt`·`retries`, `review_base`·`round_cap`·review 이벤트 `round`, 검사 `timeout_s`, 영수증 `n`·`seconds`, journey `seconds`, monitor `unchanged`·`blocks`·`total_blocks`·`refused_since`·`stalls`, `briefing.every_hours`, `--briefing-every-hours`, `PM_LOCK_WAIT_S`(잠금을 잡은 채 포함))에 값 19개(0, -0, 2^63-1, 2^63, 2^127-1, 2^127, -2^127-1, ±1e20, ±1e300, NaN, ±Infinity, ±1.5, -5, true, 2)와 문자열 23개, 추가 값 6개(±1e308, 최대 float, 5e-324, 0.5, -0.0)를 넣어 기준선과 나란히 실행(단계마다 exit·stdout, 끝의 인스턴스 파일 전부) | PASS (721건, 불일치 0. 의도한 변경 8의 3 사례 21건은 따로 셈) | 0 |
 | 회차 3: 위 변경 뒤 오라클·`keycmp.sh`·`cargo test`·fmt·clippy 재실행 | PASS | 0 |
+| 회차 4: `evidence/r4/numdiff.py`(r3 + 값 ±BIG(1e400 int), 영수증 `n`의 다른 타입 6개, 영수증 70개 정렬, hitl id 4종 × 값, `timeout_s`의 다른 타입 4개) | PASS (710건, 불일치 4건은 모두 C int 넘침 문구의 런타임 이름 = 의도한 변경 7. 문구를 맞춘 재실행 `briefing` 46건 불일치 0. 8의 3 사례 37건) | 0 |
+| 회차 4: BIG 값만 140건, 8의 3 사례의 차이를 출력해 확인 | PASS (불일치 0, 8의 3 사례 12건은 위 절에 적음) | 0 |
+| 회차 4: 정렬 대조 `evidence/r4/sortdiff`(`py_sort`+`py_lt` 대 기준선 `sorted(range(n), key=...)`, 2000개 목록, 길이 0–2000, NaN·int·float·문자열·목록·타입 섞임) | PASS (순서·오류 문구 불일치 0, 기준선 오류 554건 포함) | 0 |
+| 회차 4: 검토 재현 s1(70개, NaN 5번째)·s2(NaN hitl id)·s4(문자열 `n`)·s5(1e400 `check_timeout_s`·`timeout_s`) | PASS (기준선과 같음) | 0 |
+| 회차 4: 위 변경 뒤 오라클·`keycmp.sh`·`cargo test`·fmt·clippy, `git grep -nIiE 'python|\.py\b' -- src 'tests/*.rs' Cargo.toml` 0건, `git grep -n 'concat!' -- src` 0건, 바이너리 `pm`·`check_campaign`에 그 낱말 0건 | PASS | 0 |
 | 묶음 검사(gate) | NOT_RUN (gate의 몫) | - |
 
-판정: **COMPLETE** — `scripts/pm.py`의 모든 명령을 이식했고 회차 1 차단 지적, 회차 2의 표현 충돌, 회차 2 검토의 숫자·시간 지적을 고쳤다. 남은 차이는 사용자가 받은 의도한 변경 8에 옮겨 적었고, 그 밖의 알려진 차이는 없다. 묶음 검사는 gate가 판정한다.
+판정: **COMPLETE** — `scripts/pm.py`의 모든 명령을 이식했고 회차 1 차단 지적, 회차 2의 표현 충돌, 회차 2 검토의 숫자·시간 지적, 회차 3 검토의 차단 5건(r3-AB1, r3-C1–C4)을 고쳤다. 남은 차이는 사용자가 받은 의도한 변경 8에 옮겨 적었고, 그 밖의 알려진 차이는 없다. 묶음 검사는 gate가 판정한다.
 
 ## c11-lint — `scripts/check_campaign.py` → `src/lint/` + `src/bin/check_campaign.rs`
 

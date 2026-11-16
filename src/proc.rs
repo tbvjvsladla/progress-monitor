@@ -352,22 +352,28 @@ fn spawn_in_session(cmd: &str, cwd: &Path, log: &File) -> std::io::Result<Child>
 }
 
 /// Run one shell command in its own session, keep its output in `log_path`, and classify the end.
+/// `timeout` is read as seconds once the command has started, as the baseline's
+/// `wait(timeout)` did: a limit it could not read (an int beyond a float, a
+/// non-number) is its error, and the started command is left running.
 pub fn execute(
     cmd: &str,
     cwd: &Path,
-    timeout_s: f64,
+    timeout: &serde_json::Value,
     log_path: &Path,
-) -> std::io::Result<Executed> {
+) -> crate::error::Res<Executed> {
+    use crate::error::PmError;
+    let os = |e: std::io::Error| PmError::os(&e);
     if let Some(parent) = log_path.parent() {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent).map_err(os)?;
     }
     let started = now();
     let mut code = None;
     let mut error = None;
-    let log = File::create(log_path)?;
+    let log = File::create(log_path).map_err(os)?;
     match spawn_in_session(cmd, cwd, &log) {
         Ok(mut child) => {
-            match wait_until(&mut child, deadline_after(timeout_s))? {
+            let deadline = deadline_after(crate::py::seconds_of(timeout)?);
+            match wait_until(&mut child, deadline).map_err(os)? {
                 Some(status) => code = Some(exit_code(status)),
                 None => {
                     // SAFETY: the child leads its own process group (setsid); kill only signals it.
@@ -385,8 +391,9 @@ pub fn execute(
             let mut log = OpenOptions::new()
                 .append(true)
                 .create(true)
-                .open(log_path)?;
-            writeln!(log, "[{TOOL}] could not start the command: {err}")?;
+                .open(log_path)
+                .map_err(os)?;
+            writeln!(log, "[{TOOL}] could not start the command: {err}").map_err(os)?;
         }
     }
     let ended = now();

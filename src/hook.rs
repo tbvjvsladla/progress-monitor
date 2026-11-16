@@ -131,7 +131,7 @@ pub fn hook_decision(camp: &mut Campaign, payload: &Obj) -> Res<Option<Decision>
     if items.is_empty() {
         return Ok(None); // rule 3
     }
-    let budget_us = crate::time::timedelta_us(camp.budget("phase_minutes"), 60 * 1_000_000)?;
+    let budget_us = crate::time::timedelta_of(&camp.budget_value("phase_minutes"), 60 * 1_000_000)?;
     let overdue = items.iter().find(|i| {
         eq_str(i.get("kind"), "phase-running")
             && i.get("started")

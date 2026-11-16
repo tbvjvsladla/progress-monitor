@@ -9,7 +9,7 @@
     ".cache",
     "target"
   ],
-  "file_count": 76,
+  "file_count": 77,
   "files": [
     {
       "path": ".gitattributes",
@@ -43,9 +43,9 @@
     },
     {
       "path": "PORTING.md",
-      "bytes": 51337,
+      "bytes": 56576,
       "mode": "0644",
-      "sha256": "68b3c431c48399b688ed467c16869868995f1fba48270cb21c42390ab6f8dbf2"
+      "sha256": "82cfcda0b190f17d45a978ca42f8910719f7bf1a68d047286fe453321ab4aad5"
     },
     {
       "path": "README.md",
@@ -277,15 +277,15 @@
     },
     {
       "path": "src/campaign.rs",
-      "bytes": 27628,
+      "bytes": 28113,
       "mode": "0644",
-      "sha256": "a8fcceaf82a4ff6cf17ba5ea70351c891609bfaad072d23362e7d8e5c8ef7195"
+      "sha256": "f811f2b15408c0f64de2f93012350d93dc757ace151774717edcb149ddae8ffc"
     },
     {
       "path": "src/checks.rs",
-      "bytes": 18986,
+      "bytes": 19081,
       "mode": "0644",
-      "sha256": "667e73e63dbca1dd3ebfca4b0234850030de76185ef60a004b20b34b192b70e4"
+      "sha256": "4f5bd3ef84bb5696d98a20441b6482d854f158f4f0a4b8af0dc0abbe2cc80ff8"
     },
     {
       "path": "src/cli.rs",
@@ -295,9 +295,9 @@
     },
     {
       "path": "src/commands.rs",
-      "bytes": 61756,
+      "bytes": 61720,
       "mode": "0644",
-      "sha256": "b31850ae30e6c2b2ab7458d96a67a765584ce99b89a716db48c5fb5dd8a285af"
+      "sha256": "b67491c52a49e93b374af882fc6dbfbcb9d8598ec085a75ec0d85ad9ab09741f"
     },
     {
       "path": "src/error.rs",
@@ -307,9 +307,9 @@
     },
     {
       "path": "src/hook.rs",
-      "bytes": 11343,
+      "bytes": 11350,
       "mode": "0644",
-      "sha256": "615670f952a6ea7b52f6e1fef340f475a37f95b35c91473771934563122d61ab"
+      "sha256": "fd8650cfa8e54f828a970116d2c3de56733b00d27b80cd8b56b2e3d5455bbc7f"
     },
     {
       "path": "src/init.rs",
@@ -331,9 +331,9 @@
     },
     {
       "path": "src/lib.rs",
-      "bytes": 2346,
+      "bytes": 2360,
       "mode": "0644",
-      "sha256": "ff23934cfdf3782ed6ef6f1b50227c656a3d9857422db9fa31535ff828917b4b"
+      "sha256": "faac048eaee67b00cdbca7bf27187b5416c62cac739fc87cc12c772f8430b234"
     },
     {
       "path": "src/lint/cli.rs",
@@ -391,15 +391,15 @@
     },
     {
       "path": "src/proc.rs",
-      "bytes": 13466,
+      "bytes": 13927,
       "mode": "0644",
-      "sha256": "d8d9347986c8026e070847d59e12943b717f410db284e1b6770c5f2918820938"
+      "sha256": "97fc4e68a136d5609870dd3bc59dbeaa4aa943a72786d5b0ce6a0d6c2abbcc60"
     },
     {
       "path": "src/py.rs",
-      "bytes": 31325,
+      "bytes": 33323,
       "mode": "0644",
-      "sha256": "6b0c146ea91ce47a5170246abb8f823d35cfb6a3a4f967dfbfa8218acb6a6963"
+      "sha256": "634d76e711495a00c883b7f20e2f392185ae7eeba6c0d6ba12cff6c8a55e45c4"
     },
     {
       "path": "src/sanitize.rs",
@@ -408,16 +408,22 @@
       "sha256": "e48cafa5aca227ef37d1a582f6ed3e698bb4e1abf607e71db3f6cf38799c1d8b"
     },
     {
-      "path": "src/status.rs",
-      "bytes": 21478,
+      "path": "src/sort.rs",
+      "bytes": 21431,
       "mode": "0644",
-      "sha256": "7ad573744fe3f2bf39c1b1172af1aef0641e2a6db9ed934c9c0d2baeb1159036"
+      "sha256": "fa5ea0db91745ac0d434c594acbfb369a286d16e5247b849a1899c4eafea5716"
+    },
+    {
+      "path": "src/status.rs",
+      "bytes": 21451,
+      "mode": "0644",
+      "sha256": "0b8342b941e611b65aff953499e00cf17907e1a69a5be7a720d6405a87cbab3f"
     },
     {
       "path": "src/time.rs",
-      "bytes": 18712,
+      "bytes": 19246,
       "mode": "0644",
-      "sha256": "afb4b04fe80e690577b269073f0032fd5c91ff3b9d547df80f17774700359e47"
+      "sha256": "4c24b25350c876c7800321089ac81b98717c7adeadbc3757148e60866d53fe6d"
     },
     {
       "path": "tests/common/mod.rs",

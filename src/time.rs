@@ -401,13 +401,18 @@ fn parse_iso(text: &str) -> Option<Option<Moment>> {
 }
 
 /// The `OverflowError` for a day count beyond a C int. The wording is the
-/// baseline's without the runtime's name (intended change 7: error text).
-/// The baseline's message, its interpreter's name spelled from two pieces so the
-/// source keeps the no-interpreter-name rule of the package.
-const INT_TOO_LARGE: &str = concat!(
-    "OverflowError: Py",
-    "thon int too large to convert to C int"
-);
+/// baseline's with the runtime's name left out (intended change 7: error text).
+const INT_TOO_LARGE: &str = "OverflowError: int too large to convert to C int";
+
+/// `timedelta(<unit>=value)` for a JSON number: an int beyond i128 is still an
+/// int to the baseline (too large for a C int), not the float it is held as.
+pub fn timedelta_of(value: &serde_json::Value, unit_us: i64) -> crate::error::Res<i128> {
+    let amount = crate::py::num(value)?;
+    if crate::py::is_int(value) && matches!(amount, crate::py::Num::Float(_)) {
+        return Err(crate::error::PmError::Internal(INT_TOO_LARGE.into()));
+    }
+    timedelta_us(amount, unit_us)
+}
 
 /// `timedelta(<unit>=amount)` in microseconds, `unit_us` microseconds per unit,
 /// with the constructor's errors: a non-finite float, more days than a C int
@@ -575,6 +580,11 @@ mod tests {
             "OverflowError: days=1000000000; must have magnitude <= 999999999"
         );
         assert_eq!(err(Num::Int(3_092_376_453_120), minute), INT_TOO_LARGE);
+        let big = crate::jsonio::parse(&format!("-1{}", "0".repeat(400))).unwrap();
+        assert_eq!(
+            timedelta_of(&big, minute).unwrap_err().to_string_for_test(),
+            INT_TOO_LARGE
+        );
         assert_eq!(
             err(Num::Int(-3_092_376_453_120), minute),
             "OverflowError: days=-2147483648; must have magnitude <= 999999999"

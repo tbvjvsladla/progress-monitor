@@ -100,63 +100,11 @@ impl Num {
     }
 }
 
-/// `list.sort` with a `<` that may fail or be inconsistent (NaN): below 64 items
-/// the baseline's run detection and binary insertion, so the order is the
-/// baseline's for any comparison; from 64 on a stable merge sort, which agrees
-/// with it whenever `<` is a consistent order.
-pub fn py_sort<T>(items: &mut [T], mut lt: impl FnMut(&T, &T) -> Res<bool>) -> Res<()> {
-    let n = items.len();
-    if n < 2 {
-        return Ok(());
-    }
-    if n >= 64 {
-        let mut failure = None;
-        items.sort_by(|a, b| {
-            if failure.is_some() {
-                return Ordering::Equal;
-            }
-            let order = lt(a, b).and_then(|less| {
-                Ok(if less {
-                    Ordering::Less
-                } else if lt(b, a)? {
-                    Ordering::Greater
-                } else {
-                    Ordering::Equal
-                })
-            });
-            order.unwrap_or_else(|e| {
-                failure = Some(e);
-                Ordering::Equal
-            })
-        });
-        return failure.map_or(Ok(()), Err);
-    }
-    // count_run
-    let mut run = 2;
-    if lt(&items[1], &items[0])? {
-        while run < n && lt(&items[run], &items[run - 1])? {
-            run += 1;
-        }
-        items[..run].reverse();
-    } else {
-        while run < n && !lt(&items[run], &items[run - 1])? {
-            run += 1;
-        }
-    }
-    // binarysort
-    for start in run..n {
-        let (mut l, mut r) = (0, start);
-        while l < r {
-            let p = l + ((r - l) >> 1);
-            if lt(&items[start], &items[p])? {
-                r = p;
-            } else {
-                l = p + 1;
-            }
-        }
-        items[l..=start].rotate_right(1);
-    }
-    Ok(())
+/// `list.sort` with a `<` that may fail or be inconsistent (NaN): the
+/// baseline's own algorithm step for step, so the order (or the error) is the
+/// baseline's for any comparison.
+pub fn py_sort<T>(items: &mut [T], lt: impl FnMut(&T, &T) -> Res<bool>) -> Res<()> {
+    crate::sort::list_sort(items, lt)
 }
 
 /// Exact comparison of an int with a float (no rounding of the int).
@@ -236,7 +184,8 @@ pub fn is_int(value: &Value) -> bool {
     matches!(value, Value::Number(n) if int_text(n).is_some())
 }
 
-/// Loose equality: 1 == 1.0 == true, dicts compare without order.
+/// Loose equality: 1 == 1.0 == true, dicts compare without order. Items inside
+/// a list or dict compare as [`same_or_eq`], as the baseline's containers did.
 pub fn py_eq(a: &Value, b: &Value) -> bool {
     if let (Some(x), Some(y)) = (num_only(a), num_only(b)) {
         return x.compare(y) == Some(Ordering::Equal);
@@ -245,12 +194,75 @@ pub fn py_eq(a: &Value, b: &Value) -> bool {
         (Value::Null, Value::Null) => true,
         (Value::String(x), Value::String(y)) => x == y,
         (Value::Array(x), Value::Array(y)) => {
-            x.len() == y.len() && x.iter().zip(y).all(|(p, q)| py_eq(p, q))
+            x.len() == y.len() && x.iter().zip(y).all(|(p, q)| same_or_eq(p, q))
         }
         (Value::Object(x), Value::Object(y)) => {
-            x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| py_eq(v, w)))
+            x.len() == y.len()
+                && x.iter()
+                    .all(|(k, v)| y.get(k).is_some_and(|w| same_or_eq(v, w)))
         }
         _ => false,
+    }
+}
+
+/// Equality as the baseline's containers, dict keys and `in` saw it: identity
+/// first, then `==`. Every JSON `NaN` the baseline read was the decoder's one
+/// NaN object, so two NaN values match here (and not under a bare `==`).
+pub fn same_or_eq(a: &Value, b: &Value) -> bool {
+    let nan = |v: &Value| {
+        matches!(v, Value::Number(_)) && Num::of(v).is_some_and(|n| n.as_f64().is_nan())
+    };
+    (nan(a) && nan(b)) || py_eq(a, b)
+}
+
+/// A value that can be a dict key or set member, else the baseline's TypeError.
+pub fn hashable(value: &Value) -> Res<&Value> {
+    match value {
+        Value::Array(_) | Value::Object(_) => Err(PmError::Internal(format!(
+            "TypeError: unhashable type: '{}'",
+            type_name(value)
+        ))),
+        _ => Ok(value),
+    }
+}
+
+/// `a < b` for two JSON values: numbers (bool included) by value, strings by
+/// code points, lists item by item (the first unequal pair decides, else the
+/// shorter list is less). Any other pair is the baseline's TypeError.
+pub fn py_lt(a: &Value, b: &Value) -> Res<bool> {
+    if let (Some(x), Some(y)) = (num_only(a), num_only(b)) {
+        return Ok(x.compare(y) == Some(Ordering::Less));
+    }
+    match (a, b) {
+        (Value::String(x), Value::String(y)) => Ok(crate::jsonio::py_cmp(x, y) == Ordering::Less),
+        (Value::Array(x), Value::Array(y)) => {
+            for (p, q) in x.iter().zip(y) {
+                if !same_or_eq(p, q) {
+                    return py_lt(p, q);
+                }
+            }
+            Ok(x.len() < y.len())
+        }
+        _ => Err(PmError::Internal(format!(
+            "TypeError: '<' not supported between instances of '{}' and '{}'",
+            type_name(a),
+            type_name(b)
+        ))),
+    }
+}
+
+/// `monotonic() + value`'s reading of a time limit in seconds: a number as a
+/// float; an int beyond a float and a non-number are the baseline's errors.
+pub fn seconds_of(value: &Value) -> Res<f64> {
+    match value {
+        Value::Number(n) if is_int(value) && number_f64(n).is_infinite() => Err(PmError::Internal(
+            "OverflowError: int too large to convert to float".into(),
+        )),
+        Value::Number(_) | Value::Bool(_) => Ok(num(value)?.as_f64()),
+        other => Err(PmError::Internal(format!(
+            "TypeError: unsupported operand type(s) for +: 'float' and '{}'",
+            type_name(other)
+        ))),
     }
 }
 
@@ -646,6 +658,24 @@ mod tests {
         assert!(py_eq(&Value::from(1), &Value::from(1.0)));
         assert!(py_eq(&Value::from(true), &Value::from(1)));
         assert!(!py_eq(&Value::from("1"), &Value::from(1)));
+    }
+
+    #[test]
+    fn less_than_and_seconds_follow_the_baseline() {
+        let v = |t: &str| crate::jsonio::parse(t).unwrap();
+        assert!(py_lt(&v("\"a\""), &v("\"b\"")).unwrap());
+        assert!(py_lt(&v("[NaN, 1]"), &v("[NaN, 2]")).unwrap());
+        assert!(py_lt(&v("[1]"), &v("[1, 0]")).unwrap());
+        assert!(!py_lt(&v("NaN"), &v("1")).unwrap());
+        assert!(py_lt(&v("{}"), &v("{}")).is_err());
+        assert!(py_lt(&v("\"a\""), &v("1")).is_err());
+        assert!(same_or_eq(&v("NaN"), &v("NaN")) && !py_eq(&v("NaN"), &v("NaN")));
+        assert!(py_eq(&v("[NaN]"), &v("[NaN]")));
+        let big = format!("1{}", "0".repeat(400));
+        assert!(seconds_of(&v(&big)).is_err());
+        assert_eq!(seconds_of(&v("true")).unwrap(), 1.0);
+        assert!(seconds_of(&v("Infinity")).unwrap().is_infinite());
+        assert!(seconds_of(&v("\"5\"")).is_err());
     }
 
     #[test]

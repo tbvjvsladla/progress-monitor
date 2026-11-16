@@ -10,7 +10,7 @@ use crate::error::{PmError, Res};
 use crate::jsonio::write_json;
 use crate::proc::{alive, execute};
 use crate::py::{
-    eq_str, list_or_empty, need, num, obj, opt_truthy, plus_one, py_eq, py_str, truthy, Num, Obj,
+    eq_str, list_or_empty, need, obj, opt_truthy, plus_one, py_eq, py_str, truthy, Num, Obj,
 };
 use crate::{FINAL, SCHEMA};
 
@@ -192,10 +192,12 @@ pub fn covered_inputs(camp: &mut Campaign, check: &Obj, root: &Path) -> Res<Obj>
     Ok(covers)
 }
 
-fn timeout_of(camp: &Campaign, check: &Obj) -> Res<f64> {
+/// `check.get("timeout_s") or camp.budget("check_timeout_s")`, read as seconds
+/// only once the command has started (as the baseline's `wait` did).
+fn timeout_of(camp: &Campaign, check: &Obj) -> Value {
     match check.get("timeout_s") {
-        Some(v) if truthy(v) => Ok(num(v)?.as_f64()),
-        _ => Ok(camp.budget("check_timeout_s").as_f64()),
+        Some(v) if truthy(v) => v.clone(),
+        _ => camp.budget_value("check_timeout_s"),
     }
 }
 
@@ -226,7 +228,7 @@ pub fn run_check(
         root,
         &crate::jsonio::os_text(&check.get("cwd").map_or(".".to_string(), py_str)),
     );
-    let timeout = timeout_of(camp, check)?;
+    let timeout = timeout_of(camp, check);
     let temp = camp.dir.join("logs").join(crate::jsonio::os_text(&format!(
         ".{id}-{}-{}.tmp",
         std::process::id(),
@@ -234,7 +236,7 @@ pub fn run_check(
     )));
     let cmd = py_str(need(check, "cmd")?);
     let expect = py_str(need(check, "expect")?);
-    let done = execute(&cmd, &cwd, timeout, &temp).map_err(|e| PmError::os(&e))?;
+    let done = execute(&cmd, &cwd, &timeout, &temp)?;
     let result = if done.error.is_some() {
         "ERROR"
     } else if done.exit_code == Some(0) && done.output.contains(&expect) {

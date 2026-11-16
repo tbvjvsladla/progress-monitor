@@ -28,6 +28,7 @@ pub mod printable;
 pub mod proc;
 pub mod py;
 pub mod sanitize;
+pub mod sort;
 pub mod status;
 pub mod time;
 
