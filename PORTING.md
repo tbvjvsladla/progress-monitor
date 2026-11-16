@@ -113,3 +113,104 @@ prepare 계획대로 `src/lint/{mod,declaration,rules,control,cli}.rs`로 나눴
 - 오라클(`PM_BIN=target/release/pm PM_LINT_BIN=target/release/check_campaign`): `Ran 50 tests ... OK`.
 
 판정: **COMPLETE** (`scripts/check_campaign.py`의 모든 규칙·자체검사·CLI). `tests/*.rs` 이식(c12), 패키지 도구(c20), `.py` 삭제·문서(c21)는 다른 cell의 몫이다.
+
+## c12-tests — `tests/test_pm.py` → `tests/*.rs`
+
+### 원본 → Rust 대응
+
+| 원본 | Rust |
+|---|---|
+| `Sandbox`(fixture 전체) | `tests/common/mod.rs`의 `Sandbox`(`new`, `with(budgets, opened, open_args)`, `Drop`에서 임시 폴더 삭제). 각 시험 crate가 `mod common;`으로 쓴다 |
+| `RuleTests` 19건 | `tests/rules.rs` |
+| `FinalTests` 4건 | `tests/final_run.rs`(`final`은 예약어) |
+| `TransitionTests` 19건 | `tests/transitions.rs` |
+| `HookTests` 8건 | `tests/hook.rs` |
+| `sb.pm(*args, stdin)` | `Sandbox::pm`/`pm_stdin`: `CARGO_BIN_EXE_pm` 하위 프로세스, `--campaigns <base> --executor test`, `PM_*` 환경 변수를 모두 지운 뒤 호출. 시그널 종료는 panic |
+| `ok`/`no(code=)`/`hook(session, harness, **payload)` | `ok`/`no`·`no_code`/`hook`·`hook_s`·`hook_with` |
+| `assert_lint` | `CARGO_BIN_EXE_check_campaign <inst> --root <tmp>`(PM_* 제거), exit 0 단언 |
+| `receipts(check)`·`events(name)` | `receipts`/`all_receipts`(숫자 stem `.json`, `(check, n)` 정렬), `events`/`all_events` |
+| `[x[k] for x in ...]` | `common::pluck` |
+
+시험 이름은 원본에서 `test_` 접두를 뗀 것이다.
+
+| 원본(`tests/test_pm.py`) | Rust(`tests/*.rs`) |
+|---|---|
+| `RuleTests.test_uncommitted_input_always_runs` | `rules::uncommitted_input_always_runs` |
+| `RuleTests.test_empty_inputs_always_runs` | `rules::empty_inputs_always_runs` |
+| `RuleTests.test_ignored_files_do_not_dirty` | `rules::ignored_files_do_not_dirty` |
+| `RuleTests.test_unresolved_input_always_runs` | `rules::unresolved_input_always_runs` |
+| `RuleTests.test_input_changed_during_run_is_not_reusable` | `rules::input_changed_during_run_is_not_reusable` |
+| `RuleTests.test_same_key_pass_is_reused` | `rules::same_key_pass_is_reused` |
+| `RuleTests.test_same_key_fail_is_refused` | `rules::same_key_fail_is_refused` |
+| `RuleTests.test_latest_verdict_wins` | `rules::latest_verdict_wins` |
+| `RuleTests.test_own_fail_beats_cover` | `rules::own_fail_beats_cover` |
+| `RuleTests.test_cover_requires_same_inputs` | `rules::cover_requires_same_inputs` |
+| `RuleTests.test_cover_ignores_command_difference` | `rules::cover_ignores_command_difference` |
+| `RuleTests.test_error_is_not_fail` | `rules::error_is_not_fail` |
+| `RuleTests.test_expect_marker_required` | `rules::expect_marker_required` |
+| `RuleTests.test_exec_retry_cap` | `rules::exec_retry_cap` |
+| `RuleTests.test_forced_rerun_caps` | `rules::forced_rerun_caps` |
+| `RuleTests.test_invalidate_blocks_reuse_and_cover` | `rules::invalidate_blocks_reuse_and_cover` |
+| `RuleTests.test_env_value_changes_key` | `rules::env_value_changes_key` |
+| `RuleTests.test_expect_changes_key` | `rules::expect_changes_key` |
+| `RuleTests.test_stale_display` | `rules::stale_display` |
+| `FinalTests.test_final_ignores_gate_receipts` | `final_run::final_ignores_gate_receipts` |
+| `FinalTests.test_final_already_passed` | `final_run::final_already_passed` |
+| `FinalTests.test_final_requires_groups_settled` | `final_run::final_requires_groups_settled` |
+| `FinalTests.test_final_reset_on_gate_reopen` | `final_run::final_reset_on_gate_reopen` |
+| `TransitionTests.test_needs_cross_group_requires_gate` | `transitions::needs_cross_group_requires_gate` |
+| `TransitionTests.test_gate_requires_members_done` | `transitions::gate_requires_members_done` |
+| `TransitionTests.test_gate_pass_closes_unmarked_only` | `transitions::gate_pass_closes_unmarked_only` |
+| `TransitionTests.test_gate_reopen_keeps_invariant` | `transitions::gate_reopen_keeps_invariant` |
+| `TransitionTests.test_cell_reopen_after_gate_fail` | `transitions::cell_reopen_after_gate_fail` |
+| `TransitionTests.test_member_added_to_passed_group_reopens` | `transitions::member_added_to_passed_group_reopens` |
+| `TransitionTests.test_marked_cell_closes_after_clean_review` | `transitions::marked_cell_closes_after_clean_review` |
+| `TransitionTests.test_review_cap_stops_only_if_blocking` | `transitions::review_cap_stops_only_if_blocking` |
+| `TransitionTests.test_auto_cell_cap_hands_over` | `transitions::auto_cell_cap_hands_over` |
+| `TransitionTests.test_parentless_cell_review_is_none` | `transitions::parentless_cell_review_is_none` |
+| `TransitionTests.test_cancel_rules` | `transitions::cancel_rules` |
+| `TransitionTests.test_regroup_keeps_counts` | `transitions::regroup_keeps_counts` |
+| `TransitionTests.test_waiting_cell_does_not_block_others` | `transitions::waiting_cell_does_not_block_others` |
+| `TransitionTests.test_cell_resume_requires_ref` | `transitions::cell_resume_requires_ref` |
+| `TransitionTests.test_explore_caps` | `transitions::explore_caps` |
+| `TransitionTests.test_hitl_group_refused_on_passed_gate` | `transitions::hitl_group_refused_on_passed_gate` |
+| `TransitionTests.test_gate_error_keeps_pending` | `transitions::gate_error_keeps_pending` |
+| `TransitionTests.test_dead_gate_run_recovers` | `transitions::dead_gate_run_recovers` |
+| `TransitionTests.test_allow_raises_cap` | `transitions::allow_raises_cap` |
+| `HookTests.test_hook_no_action_when_nothing_actionable` | `hook::hook_no_action_when_nothing_actionable` |
+| `HookTests.test_hook_never_exits_nonzero` | `hook::hook_never_exits_nonzero` |
+| `HookTests.test_hook_ignores_other_session` | `hook::hook_ignores_other_session` |
+| `HookTests.test_hook_background_tasks_not_counted` | `hook::hook_background_tasks_not_counted` |
+| `HookTests.test_hook_refused_fail_is_stall` | `hook::hook_refused_fail_is_stall` |
+| `HookTests.test_hook_release_stays_until_change` | `hook::hook_release_stays_until_change` |
+| `HookTests.test_hook_bypasses_when_retries_spent` | `hook::hook_bypasses_when_retries_spent` |
+| `HookTests.test_briefing_due_by_hours` | `hook::briefing_due_by_hours` |
+
+### 단언 변경
+
+없음. 의도한 변경 1·2·7(실행 명령, 스킬 폴더, CLI 문구)을 단언하는 원본 시험이 없다(명령 단언은 부분 문자열 `phase retry a1 prepare`·`cell stop a1`·`--campaigns <base>`이고, 오류 문구·usage·`--help`·`python3 -B`·`pm.py`를 단언하지 않는다). 오라클 `CHANGES.md`와 같은 판단. 값·순서·개수·부분 문자열·None 단언을 그대로 옮겼다. `assertIsNone(d[k])`는 "키가 있고 null", `.get(k) == None`은 "없거나 null"로 원본 의미를 맞췄다.
+
+### 실행 방식·fixture 변경 (단언 아님, 닫힌 목록)
+
+| 원본 | Rust | 이유 |
+|---|---|---|
+| in-process `pm.main`, `sys.stdin` 교체 | 하위 프로세스 `CARGO_BIN_EXE_pm`(PM_* 제거), stdin 파이프 | 바이너리 시험 |
+| `sys.executable -B check_campaign.py` | `CARGO_BIN_EXE_check_campaign` | 바이너리 시험 |
+| `error_is_not_fail`의 검사 명령 `python3 -c 'os.kill(os.getpid(), SIGKILL)'` | `kill -KILL $$`(검사 셸 자신이 SIGKILL) | Python 0. 기준선 분류상 둘 다 `signal` |
+| `env_value_changes_key`의 `os.environ["PM_TEST_FLAVOR"]` | `Sandbox::set_env`: 그 Sandbox의 pm 호출에만 PM_* 제거 뒤 `.env(...)` | cargo는 시험을 병렬 스레드로 돌린다. pm과 검사가 그 값을 보는 의미는 같다 |
+| `dead_gate_run_recovers`의 `Popen([python, -c, pass]).wait()` 죽은 pid | `Command::new("true")` 실행·대기 뒤 `id()` | Python 0 |
+| 같은 시험의 `.lock` flock 보유 자식 프로세스 | `libc::fork` 자식이 `open`→`flock(LOCK_EX)`→파이프에 `held`→`pause`; 부모가 `held`를 읽고 SIGKILL·`waitpid`(`Holder`의 Drop이 정리) | Python 0. 자식은 async-signal-safe 호출만 쓴다 |
+| `hook_never_exits_nonzero`의 `[python, -B, pm.py, ...]` | `CARGO_BIN_EXE_pm`(PM_* 제거, `--executor` 없음은 원본대로), `/dev/full`은 `Stdio::from(File)`, 자기 참조 symlink | 바이너리 시험 |
+| `datetime.now(utc) - timedelta(hours=N)).isoformat()` | `common::utc_iso_hours_ago(N)`(`YYYY-MM-DDTHH:MM:SS.ffffff+00:00`, 민간력 변환 직접 작성) | 시험 대상 lib `time`을 쓰지 않기 위해 |
+| `json.dumps(opened, ensure_ascii=False)`(journey 한 줄) | `serde_json::to_string`(구분자 `,`/`:`) | pm은 JSON으로 읽기만 하므로 결과 같음 |
+| `tempfile.mkdtemp(prefix="pm-test-")` | `temp_dir()/pm-test-<pid>-<카운터>-<nanos>` | 병렬 시험 이름 충돌 방지 |
+
+### 검사
+
+- `cargo test --no-run --locked`: 통과.
+- `cargo fmt --check`, `cargo clippy --all-targets --locked -- -D warnings`: 통과(자기 확인).
+- `cargo test --locked`: lib 단위 12건 + 통합 50건(rules 19, final_run 4, transitions 19, hook 8) 통과(자기 확인).
+- 음성 대조: `hook_bypasses_when_retries_spent`의 기대값을 일부러 틀리게 바꾸면 그 시험만 FAILED, 되돌린 뒤 통과.
+- `grep -rniE 'python|\.py\b' tests/*.rs tests/common`: 0건.
+
+판정: **COMPLETE** (`tests/test_pm.py` 50건). `tests/test_package.py` 12건(c20), `.py` 삭제(c21)는 다른 cell의 몫이다.
