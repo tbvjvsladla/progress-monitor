@@ -1,0 +1,16 @@
+[package]
+name = "progress-monitor"
+version = "2.0.0"
+edition = "2021"
+description = "Campaign executor: phase states, gates, receipts, journey events and the Stop hook"
+license-file = "LICENSE"
+publish = false
+
+[lib]
+name = "progress_monitor"
+path = "src/lib.rs"
+
+[dependencies]
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+libc = "0.2"
