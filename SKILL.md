@@ -3,7 +3,7 @@ name: progress-monitor
 description: "2계층 캠페인을 수행할 때 쓴다. 검증을 묶음의 gate에서만 한 번 돌리고(재사용·덮임·재실행 거절), 단계를 새 맥락의 수행자에게 넘기며, 정체를 알아채 우회하고, 수행 중의 방향 조정과 사람에게 넘김을 기록한다. 캠페인이 없는 과업에는 쓰지 않는다."
 metadata:
   runtime: "Rust(cargo, 설치 때 빌드), Git"
-  version: "2.1.0"
+  version: "2.2.0"
 ---
 
 # 진행 감시 (progress-monitor)

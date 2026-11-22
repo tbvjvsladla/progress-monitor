@@ -2,7 +2,7 @@
 
 > **여러 세션에 걸쳐 오래 도는 개선 작업(Long Time E2E)을, 꼭 필요한 검증만 한 번씩 돌리며 멈추지 않고 이어 가게 하는 캠페인 운영 스킬입니다.**
 >
-> 배포 버전 **2.1.0** · 브랜치 `logic-rust` · Rust(cargo, 설치 때 빌드) · Git · Claude Code와 Codex 프로젝트 스킬용 전체 폴더 패키지
+> 배포 버전 **2.2.0** · 브랜치 `logic-rust` · Rust(cargo, 설치 때 빌드) · Git · Claude Code와 Codex 프로젝트 스킬용 전체 폴더 패키지
 
 ## 해결하려는 문제: 하루를 넘기는 작업은 대화 기억으로 이어 갈 수 없습니다
 
@@ -85,13 +85,13 @@ wiki-desk를 설치하면 프로젝트에 `__llm-wiki/`가 생기고, wiki-desk 
 
 **폴더 전체가 한 단위입니다.** `SKILL.md`만 복사하면 실행기와 뼈대가 빠집니다. 같은 이름의 스킬이 이미 있으면 덮어쓰지 말고 차이를 먼저 검토하세요.
 
-배포 단위는 **태그된 커밋**입니다. `git archive`로 받으면 `PACKAGE_MANIFEST.json`과 바이트 단위로 같은 트리가 설치됩니다.
+배포 단위는 **태그된 커밋**입니다. `git archive`로 받은 설치본은 `package_manifest --check --against`로 받은 저장소의 태그와 바이트를 직접 비교해 확인합니다. `PACKAGE_MANIFEST.json`은 패키지를 이루는 파일의 목록·크기·모드만 적고 digest는 적지 않습니다.
 
 ```bash
 (
   set -euo pipefail
   SOURCE="/absolute/path/to/progress-monitor"   # 이 저장소를 받은 폴더(git clone)
-  VERSION="v2.1.0"
+  VERSION="v2.2.0"
   PROJECT="/absolute/path/to/project"           # 설치할 프로젝트 루트
   DEST="$PROJECT/.claude/skills/progress-monitor"
 
@@ -99,7 +99,8 @@ wiki-desk를 설치하면 프로젝트에 `__llm-wiki/`가 생기고, wiki-desk 
   mkdir -p "$DEST"
   git -C "$SOURCE" archive "$VERSION" | tar -x -C "$DEST"
   (cd "$DEST" && cargo build --release --locked)                   # 실행 파일 빌드
-  "$DEST/target/release/package_manifest" --check "$DEST"          # MANIFEST OK
+  "$DEST/target/release/package_manifest" --check "$DEST" \
+    --against "$SOURCE" --ref "$VERSION"                           # MANIFEST OK (…, same bytes as v2.2.0)
 )
 ```
 
@@ -172,7 +173,7 @@ progress-monitor/
 │     ├─ check_campaign.rs  틀·인스턴스 형식 검사(읽기만 함, 자체 음성 대조 포함)
 │     ├─ smoke_install.rs   빈 임시 프로젝트 설치 연기
 │     ├─ sanitize_check.rs  배포 위생 검사(배포자용)
-│     └─ package_manifest.rs PACKAGE_MANIFEST 생성·검증(배포자용)
+│     └─ package_manifest.rs PACKAGE_MANIFEST 생성·검증, 설치본과 태그의 직접 비교
 ├─ assets/
 │  ├─ campaigns/            init이 깔 README.md와 _template/
 │  └─ examples/             합성 예제 캠페인과 그 대상
@@ -186,7 +187,7 @@ progress-monitor/
 cargo build --release --locked                  # 먼저 빌드
 target/release/sanitize_check                   # SANITIZE OK (0 hits)
 cargo test --locked                             # 실행기 회귀 + init·위생·버전·설치 연기
-target/release/smoke_install                    # 마지막 줄 SMOKE-PASS
+target/release/smoke_install                    # 마지막 줄 SMOKE-PASS (설치본 직접 비교와 --against 포함)
 target/release/package_manifest                 # 파일을 바꿨으면 다시 쓴다
 target/release/package_manifest --check         # MANIFEST OK
 ```

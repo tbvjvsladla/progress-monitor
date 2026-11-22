@@ -3,7 +3,8 @@
 //!
 //! Steps: copy the skill folder to <tmp>/.claude/skills/progress-monitor (and link it from
 //! .agents/skills for Codex) with the executables next to this one in its target/release/,
-//! `init` dry-run then `--apply` then again (nothing is overwritten), lint the laid
+//! compare the copy with the package byte for byte, check an archive install of a tag with
+//! `package_manifest --check --against` (no digests), `init` dry-run then `--apply` then again (nothing is overwritten), lint the laid
 //! template, run the demo campaign from assets/examples through prepare -> change ->
 //! gate -> final, lint the instance, and call the Stop hook with and without
 //! campaigns/ACTIVE.
@@ -20,6 +21,7 @@ use serde_json::{json, Value};
 
 use progress_monitor::install::{copy_binaries, copy_tree, make_temp_dir, SKIP};
 use progress_monitor::jsonio::{compact, parse, pretty};
+use progress_monitor::manifest::inventory;
 use progress_monitor::paths::Paths;
 use progress_monitor::proc::{capture_input, exit_code, Captured};
 use progress_monitor::py::{py_str, strip, truthy};
@@ -122,6 +124,11 @@ impl Smoke {
             }
         }
         command.env("PM_EXECUTOR", "smoke");
+        if program == Path::new("git") {
+            command
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_NOSYSTEM", "1");
+        }
         if stdin.is_none() {
             command.stdin(Stdio::null());
         }
@@ -224,6 +231,97 @@ fn install(s: &mut Smoke, package: &Path, bin_dir: &Path) -> Step<()> {
     )
     .map_err(crash)?;
     s.ok("install");
+    Ok(())
+}
+
+/// The installed copy has the package's bytes, and an archive install of a tag passes
+/// `package_manifest --check --against` while one changed byte fails it.
+fn manifest_steps(s: &mut Smoke, tmp: &Path, package: &Path, bin_dir: &Path) -> Step<()> {
+    for rel in inventory(package).map_err(crash)? {
+        let original = fs::read(package.join(&rel)).map_err(crash)?;
+        let copied = fs::read(s.skill.join(&rel)).map_err(crash)?;
+        if original != copied {
+            return s.fail("installed copy has the package's bytes", Value::from(rel));
+        }
+    }
+    s.ok("installed copy has the package's bytes (direct comparison, no digest)");
+
+    let repo = tmp.join("release-repo");
+    copy_tree(&s.skill, &repo, &SKIP).map_err(crash)?;
+    s.git(&repo, &["init", "-q", "."])?;
+    s.git(&repo, &["add", "-A"])?;
+    s.git(&repo, &["commit", "-q", "-m", "release"])?;
+    s.git(&repo, &["tag", "-a", "t1", "-m", "t1"])?;
+    let installed = tmp.join("archive-install");
+    fs::create_dir(&installed).map_err(crash)?;
+    let mut archive = Command::new("git")
+        .args(GIT)
+        .arg("-C")
+        .arg(&repo)
+        .args(["archive", "t1"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(crash)?;
+    let stream = archive
+        .stdout
+        .take()
+        .ok_or_else(|| crash("git archive: no output"))?;
+    let untar = Command::new("tar")
+        .arg("-x")
+        .arg("-C")
+        .arg(&installed)
+        .stdin(stream)
+        .output()
+        .map_err(crash)?;
+    let archived = archive.wait_with_output().map_err(crash)?;
+    if !archived.status.success() || !untar.status.success() {
+        return s.fail(
+            "git archive t1 | tar -x",
+            json!({"git": String::from_utf8_lossy(&archived.stderr), "tar": String::from_utf8_lossy(&untar.stderr)}),
+        );
+    }
+    s.ok("git archive t1 | tar -x makes an archive install");
+    let built = installed.join("target").join("release");
+    fs::create_dir_all(&built).map_err(crash)?;
+    write_text(&built.join("pm"), "built after install\n")?;
+
+    let tool = bin_dir.join("package_manifest");
+    let root = installed.to_string_lossy().into_owned();
+    let repo_text = repo.to_string_lossy().into_owned();
+    let args = [
+        "--check",
+        root.as_str(),
+        "--against",
+        repo_text.as_str(),
+        "--ref",
+        "t1",
+    ];
+    let done = s.run(&tool, &args, None, None)?;
+    if done.code != 0 || !done.stdout.contains("same bytes as t1") {
+        return s.fail(
+            "package_manifest --check --against",
+            json!({"exit": done.code, "stdout": tail(&done.stdout, 2000), "stderr": tail(&done.stderr, 2000)}),
+        );
+    }
+    s.ok("package_manifest --against agrees with the archive install (target/ from a build is ignored)");
+
+    let skill_md = installed.join("SKILL.md");
+    let text = read_text(&skill_md)?;
+    write_text(
+        &skill_md,
+        &text.replacen("progress-monitor", "progress-monitoq", 1),
+    )?;
+    let done = s.run(&tool, &args, None, None)?;
+    if done.code != 1 || !done.stdout.contains("differs from t1: SKILL.md") {
+        return s.fail(
+            "package_manifest --against notices one changed byte",
+            json!({"exit": done.code, "stdout": tail(&done.stdout, 2000)}),
+        );
+    }
+    s.ok("package_manifest --against notices one changed byte with the size unchanged");
     Ok(())
 }
 
@@ -379,6 +477,7 @@ fn smoke(tmp: &Path, package: &Path, bin_dir: &Path) -> Result<(), (Stop, Vec<St
         steps: Vec::new(),
     };
     install(&mut s, package, bin_dir)
+        .and_then(|_| manifest_steps(&mut s, tmp, package, bin_dir))
         .and_then(|_| init_steps(&mut s))
         .and_then(|_| campaign_steps(&mut s))
         .map_err(|stop| (stop, s.steps.clone()))

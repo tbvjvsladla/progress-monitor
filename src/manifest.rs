@@ -1,22 +1,27 @@
-//! PACKAGE_MANIFEST.json: every file with path, bytes, mode and sha256.
+//! PACKAGE_MANIFEST.json: every packaged file with path, bytes and mode.
 //!
-//! The manifest itself and `INVENTORY_EXCLUDES` are not listed. mode is one of the two
-//! values Git keeps (0644/0755), so a manifest made from the work tree also verifies an
-//! install taken with `git archive`. Format: manifest_version 1.0.0.
+//! The manifest says which files make up the package. It holds no digests: whether an
+//! installed copy is intact is checked with git, or by comparing its bytes with the
+//! tagged blobs directly ([`against`]). The check compares the file list and sizes; mode
+//! is one of the two values Git keeps (0644/0755) and is recorded only, since some file
+//! systems cannot hold the executable bit. The manifest itself and `INVENTORY_EXCLUDES`
+//! are not listed. Format: manifest_version 2.0.0.
 
 use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::fs;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::process::Command;
 
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 
 use crate::jsonio::parse;
 use crate::py::{py_eq, splitlines, strip};
 
 pub const MANIFEST: &str = "PACKAGE_MANIFEST.json";
-pub const MANIFEST_VERSION: &str = "1.0.0";
+pub const MANIFEST_VERSION: &str = "2.0.0";
 pub const PACKAGE_NAME: &str = "progress-monitor";
 pub const INVENTORY_EXCLUDES: [&str; 5] = [MANIFEST, ".git", "__pycache__", ".cache", "target"];
 
@@ -85,20 +90,12 @@ pub fn build(root: &Path) -> Result<Value, String> {
     let mut files = Vec::new();
     for rel in inventory(root)? {
         let path = root.join(&rel);
-        let data = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let mode = fs::metadata(&path)
-            .map_err(|e| format!("{}: {e}", path.display()))?
-            .permissions()
-            .mode();
-        let sha: String = Sha256::digest(&data)
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let meta = fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let mode = meta.permissions().mode();
         files.push(json!({
             "path": rel,
-            "bytes": data.len(),
+            "bytes": meta.len(),
             "mode": if mode & 0o111 != 0 { "0755" } else { "0644" },
-            "sha256": sha,
         }));
     }
     Ok(json!({
@@ -150,12 +147,79 @@ pub fn diff(root: &Path) -> Result<Vec<String>, String> {
     let all: BTreeSet<&String> = h.iter().chain(w.iter()).map(|(p, _)| p).collect();
     for p in all {
         let same = match (lookup(&h, p), lookup(&w, p)) {
-            (Some(a), Some(b)) => py_eq(a, b),
+            (Some(a), Some(b)) => py_eq(
+                a.get("bytes").unwrap_or(&Value::Null),
+                b.get("bytes").unwrap_or(&Value::Null),
+            ),
             _ => false,
         };
         if !same {
             out.push(p.clone());
         }
+    }
+    Ok(out)
+}
+
+fn git(repo: &Path, args: &[&OsStr]) -> Result<Vec<u8>, String> {
+    let done = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .map_err(|e| format!("git: {e}"))?;
+    if !done.status.success() {
+        let shown: Vec<String> = args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        return Err(format!(
+            "git {}: {}",
+            shown.join(" "),
+            String::from_utf8_lossy(&done.stderr).trim()
+        ));
+    }
+    Ok(done.stdout)
+}
+
+/// What differs between the installed files at `root` and the blobs of `reference` in the
+/// git repository `repo`, compared byte for byte: paths missing from the copy, paths the
+/// tag does not have, and paths whose bytes differ. Git errors are errors, not findings.
+pub fn against(root: &Path, repo: &Path, reference: &str) -> Result<Vec<String>, String> {
+    let listing = git(
+        repo,
+        &[
+            OsStr::new("ls-tree"),
+            OsStr::new("-r"),
+            OsStr::new("-z"),
+            OsStr::new("--name-only"),
+            OsStr::new(reference),
+        ],
+    )?;
+    let mut installed: BTreeSet<String> = inventory(root)?.into_iter().collect();
+    if root.join(MANIFEST).is_file() {
+        installed.insert(MANIFEST.to_string());
+    }
+    let mut listed = BTreeSet::new();
+    let mut out = Vec::new();
+    for raw in listing.split(|b| *b == 0).filter(|n| !n.is_empty()) {
+        let shown = String::from_utf8_lossy(raw).into_owned();
+        listed.insert(shown.clone());
+        if !installed.contains(&shown) {
+            out.push(format!("missing against {reference}: {shown}"));
+            continue;
+        }
+        let mut spec = reference.as_bytes().to_vec();
+        spec.push(b':');
+        spec.extend_from_slice(raw);
+        let blob = git(repo, &[OsStr::new("show"), OsStr::from_bytes(&spec)])?;
+        let path = root.join(OsStr::from_bytes(raw));
+        let have = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        if have != blob {
+            out.push(format!("differs from {reference}: {shown}"));
+        }
+    }
+    for p in installed.difference(&listed) {
+        out.push(format!("not in {reference}: {p}"));
     }
     Ok(out)
 }
