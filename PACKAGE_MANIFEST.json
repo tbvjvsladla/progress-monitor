@@ -1,7 +1,7 @@
 {
   "manifest_version": "1.0.0",
   "package": "progress-monitor",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "inventory_excludes": [
     "PACKAGE_MANIFEST.json",
     ".git",
@@ -27,13 +27,13 @@
       "path": "Cargo.lock",
       "bytes": 7101,
       "mode": "0644",
-      "sha256": "fe4bf1448af2bb26ac074d81aa23b2c078837a4ff3606b08072372d5931e9a99"
+      "sha256": "355f3ec33c7dc5ee128b24b582596937d09942fd687ecaa4a5432a033c3086f2"
     },
     {
       "path": "Cargo.toml",
       "bytes": 415,
       "mode": "0644",
-      "sha256": "01492ba22fa237a53121c1118b8055e255877378e855609dddeb558c7716b731"
+      "sha256": "18b71451f60e07d48c76ad83e26c6014b2ee50d4fab72ad96457cec3e2aa2695"
     },
     {
       "path": "LICENSE",
@@ -49,21 +49,21 @@
     },
     {
       "path": "README.md",
-      "bytes": 17233,
+      "bytes": 17262,
       "mode": "0644",
-      "sha256": "39280bcd058802361308011baff6a569645123183a2b8202e97742ebc1b2f73e"
+      "sha256": "2ce2e34b56a30febf92ff37c255d92d485c702f4cb50b57db1db3859d7268d7d"
     },
     {
       "path": "SKILL.md",
-      "bytes": 9761,
+      "bytes": 10740,
       "mode": "0644",
-      "sha256": "9963a008f817b7cef1ac6fd45840e72fa55813966fc22ebae366e6e00bb839ba"
+      "sha256": "a4f94a08a05c8fbdd94f526090ad4df8be41d2a820236689055b4b8666dfb023"
     },
     {
       "path": "assets/campaigns/README.md",
-      "bytes": 23864,
+      "bytes": 28443,
       "mode": "0644",
-      "sha256": "9e7d7b666ffa1e623ad44ac7ab5dcafa28cb6d2c8b8af412189f81247311af74"
+      "sha256": "7564a2388186c6da6a93cbfba48f4adcad1ce2a28b6c022466b586c5f7aef4ea"
     },
     {
       "path": "assets/campaigns/_template/campaign.json",
@@ -199,9 +199,9 @@
     },
     {
       "path": "references/gate.md",
-      "bytes": 12825,
+      "bytes": 14575,
       "mode": "0644",
-      "sha256": "3e9ff29470bbef4c9f4dfd3237372b10076c86bce20729f76cd9164353ad83e6"
+      "sha256": "113d44a73643a40e49f4966a2f879ec12505eb7eab295d345074267e9366fbb0"
     },
     {
       "path": "references/hooks.md",
@@ -211,9 +211,9 @@
     },
     {
       "path": "references/monitor.md",
-      "bytes": 9944,
+      "bytes": 10123,
       "mode": "0644",
-      "sha256": "55041c590845da1179573a901fde0b075850911631324a1b151312f08394e728"
+      "sha256": "5a02c7a7704f5891b7a30c871812b06264b20033e0bb4c619de8718f5c3f316e"
     },
     {
       "path": "src/bin/check_campaign.rs",
@@ -259,15 +259,15 @@
     },
     {
       "path": "src/cli.rs",
-      "bytes": 19934,
+      "bytes": 20013,
       "mode": "0644",
-      "sha256": "9f3863bc9b42dbfd1ad641fa77643d3000093e38adce43daa40639d80d3cb91a"
+      "sha256": "f1b5249b68029beced30e7d350a8b800aef20548cf40729d98a5d2e3b8bdb265"
     },
     {
       "path": "src/commands.rs",
-      "bytes": 61720,
+      "bytes": 67019,
       "mode": "0644",
-      "sha256": "b67491c52a49e93b374af882fc6dbfbcb9d8598ec085a75ec0d85ad9ab09741f"
+      "sha256": "96b0e2c9243c152d1a6d608acc78c29f97ba29b6d6372f148d62a4c1531e45d8"
     },
     {
       "path": "src/error.rs",
@@ -277,9 +277,9 @@
     },
     {
       "path": "src/hook.rs",
-      "bytes": 11350,
+      "bytes": 11430,
       "mode": "0644",
-      "sha256": "fd8650cfa8e54f828a970116d2c3de56733b00d27b80cd8b56b2e3d5455bbc7f"
+      "sha256": "322f7cac2aea33ea0c6a8f3507a481343cc6648f05b52a90f494ebedb8dcc753"
     },
     {
       "path": "src/init.rs",
@@ -301,9 +301,9 @@
     },
     {
       "path": "src/lib.rs",
-      "bytes": 2360,
+      "bytes": 2381,
       "mode": "0644",
-      "sha256": "faac048eaee67b00cdbca7bf27187b5416c62cac739fc87cc12c772f8430b234"
+      "sha256": "229cf1f4060946d660f652d90d6c1eedb68ad64073f612a6b0c95b4f830d8e68"
     },
     {
       "path": "src/lint/cli.rs",
@@ -385,9 +385,9 @@
     },
     {
       "path": "src/status.rs",
-      "bytes": 21451,
+      "bytes": 22396,
       "mode": "0644",
-      "sha256": "0b8342b941e611b65aff953499e00cf17907e1a69a5be7a720d6405a87cbab3f"
+      "sha256": "80a0da89feb0bdeabbff68a9affb4f1d2e66014fc7e8c1b54cd0a21b95434742"
     },
     {
       "path": "src/time.rs",
@@ -397,9 +397,9 @@
     },
     {
       "path": "tests/common/mod.rs",
-      "bytes": 20545,
+      "bytes": 21413,
       "mode": "0644",
-      "sha256": "c0f1eef4636e82d52278c40a53af46b9a9370e53896a9322ec868c3340bee1e4"
+      "sha256": "85f9b9ad7157bf09ae40eb590624bc459541a1e2ed9b891bc3da6ef8cbf8ce08"
     },
     {
       "path": "tests/final_run.rs",
@@ -427,9 +427,9 @@
     },
     {
       "path": "tests/transitions.rs",
-      "bytes": 18201,
+      "bytes": 22894,
       "mode": "0644",
-      "sha256": "d2f0096403d11663649a19ea8c82a370101979bacb2bf21a6786f3a4a9010a01"
+      "sha256": "daa6825b49bf75848a2c0bd2d319e6dc650b4ad8c8228c9360f2c775c48fe414"
     }
   ]
 }

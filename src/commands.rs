@@ -571,10 +571,11 @@ pub fn cmd_gate_run(camp: &mut Campaign, args: &Args) -> Out {
                 Value::Array(members.keys().map(|k| v(k)).collect()),
             );
             for i in camp.member_indices(group, true)? {
-                let cell = camp.cell_at_mut(i);
-                if eq_str(cell.get("review"), "none") {
-                    cell.insert("state".into(), v("closed"));
-                    closed.push(py_str(&cell["cell"]));
+                let unmarked = eq_str(camp.cell_at(i).get("review"), "none");
+                let name = py_str(&camp.cell_at(i)["cell"]);
+                if unmarked || closable(standing_review(camp, &name)?.0) {
+                    camp.cell_at_mut(i).insert("state".into(), v("closed"));
+                    closed.push(name);
                 }
             }
             camp.save_decl()?;
@@ -1022,6 +1023,93 @@ pub fn review_round(camp: &mut Campaign, cell: &Obj) -> Res<Value> {
         }
     }
     Ok(crate::py::py_max(&rounds)?.unwrap_or(Value::from(0)))
+}
+
+/// When the cell last finished changing: the latest `ended` of its phases, None while
+/// one is not done.
+pub fn settled_at(camp: &Campaign, name: &str) -> Res<Option<crate::time::Moment>> {
+    let mut latest: Option<crate::time::Moment> = None;
+    for phase in camp.phases() {
+        let data = camp.phase(name, &phase)?;
+        let done = is_state(&data, "done")?;
+        let moment = data
+            .get("ended")
+            .and_then(Value::as_str)
+            .and_then(parse_time);
+        match moment {
+            Some(m) if done => {
+                if latest.is_none_or(|l| m > l) {
+                    latest = Some(m);
+                }
+            }
+            _ => return Ok(None),
+        }
+    }
+    Ok(latest)
+}
+
+/// The review that still speaks for the cell as it is now, with its standing: "none",
+/// "not-run", "clean", "blocking" or "accepted" (a person accepted the blocking findings
+/// with `cell close --accept-ref`). A review stands when it was recorded after the cell
+/// last finished changing. A gate re-run caused by another cell does not unseat it, so a
+/// cell closed without blocking findings, or with findings a person accepted, is not
+/// reviewed again.
+pub fn standing_review(camp: &mut Campaign, name: &str) -> Res<(&'static str, Option<Obj>)> {
+    let settled = settled_at(camp, name)?;
+    let events: Vec<Obj> = camp
+        .events()?
+        .iter()
+        .filter(|e| {
+            eq_str(e.get("cell"), name)
+                && (eq_str(e.get("event"), "review") || eq_str(e.get("event"), "review-accept"))
+        })
+        .cloned()
+        .collect();
+    let Some(last) = events
+        .iter()
+        .rposition(|e| eq_str(e.get("event"), "review"))
+    else {
+        return Ok(("none", None));
+    };
+    let latest = events[last].clone();
+    let when = latest
+        .get("utc")
+        .and_then(Value::as_str)
+        .and_then(parse_time);
+    match (settled, when) {
+        (Some(s), Some(w)) if w > s => {}
+        _ => return Ok(("none", None)),
+    }
+    if latest.get("ran") != Some(&Value::Bool(true)) {
+        return Ok(("not-run", Some(latest)));
+    }
+    if latest.get("clean") == Some(&Value::Bool(true)) {
+        return Ok(("clean", Some(latest)));
+    }
+    let accepted = events[last + 1..]
+        .iter()
+        .any(|e| eq_str(e.get("event"), "review-accept"));
+    Ok((if accepted { "accepted" } else { "blocking" }, Some(latest)))
+}
+
+/// Standings a cell closes on: a clean review, or blocking findings a person accepted.
+pub fn closable(standing: &str) -> bool {
+    standing == "clean" || standing == "accepted"
+}
+
+fn close_hint(standing: &str) -> &'static str {
+    match standing {
+        "none" => "record a review of the cell as it is now",
+        "not-run" => "record a review that ran",
+        _ => "fix it (cell reopen), or close --accept-ref once a person accepts the findings",
+    }
+}
+
+fn round_of(review: &Option<Obj>) -> Value {
+    review
+        .as_ref()
+        .and_then(|r| r.get("round").cloned())
+        .unwrap_or(Value::Null)
 }
 
 fn ensure_group(
@@ -1473,6 +1561,12 @@ pub fn cmd_cell_resume(camp: &mut Campaign, args: &Args) -> Out {
 
 pub fn cmd_cell_close(camp: &mut Campaign, args: &Args) -> Out {
     let name = args.pos(0);
+    let accept = args.opt("--accept-ref");
+    if accept.is_some_and(|a| strip(a).is_empty()) {
+        return Err(PmError::usage(
+            "cell close --accept-ref needs where the person's acceptance is recorded",
+        ));
+    }
     let _guard = camp.lock(None)?;
     let cell = camp.cell(name)?;
     let group = py_str(need(&cell, "group")?);
@@ -1483,7 +1577,9 @@ pub fn cmd_cell_close(camp: &mut Campaign, args: &Args) -> Out {
             vec![("hint", v("an unmarked cell closes when its gate passes"))],
         ));
     }
-    if !is_state(&cell, "open")? || !is_state(&gate, "passed")? {
+    let allowed = is_state(&cell, "open")? || (accept.is_some() && is_state(&cell, "stopped")?);
+    let passed = is_state(&gate, "passed")?;
+    if !allowed || (!passed && accept.is_none()) {
         return Err(PmError::refused(
             "conditions-unmet",
             vec![
@@ -1492,35 +1588,54 @@ pub fn cmd_cell_close(camp: &mut Campaign, args: &Args) -> Out {
             ],
         ));
     }
-    let passed_at = gate
-        .get("ended")
-        .and_then(Value::as_str)
-        .and_then(parse_time);
-    let reviews: Vec<Obj> = camp
-        .events()?
-        .iter()
-        .filter(|e| eq_str(e.get("event"), "review") && eq_str(e.get("cell"), name))
-        .cloned()
-        .collect();
-    let latest = reviews.last();
-    let when = latest
-        .and_then(|l| l.get("utc"))
-        .and_then(Value::as_str)
-        .and_then(parse_time);
-    let clean = latest.is_some_and(|l| {
-        l.get("ran") == Some(&Value::Bool(true)) && l.get("clean") == Some(&Value::Bool(true))
-    });
-    let after = match (passed_at, when) {
-        (Some(p), Some(w)) => w > p,
-        _ => false,
-    };
-    if latest.is_none() || !after || !clean {
-        let round = latest.map_or(Value::Null, |l| {
-            l.get("round").cloned().unwrap_or(Value::Null)
-        });
+    let (standing, review) = standing_review(camp, name)?;
+    let mut fields: Vec<(&str, Value)> = Vec::new();
+    if let Some(reference) = accept {
+        if standing != "blocking" {
+            let hint = if closable(standing) {
+                "close without --accept-ref"
+            } else {
+                close_hint(standing)
+            };
+            return Err(PmError::refused(
+                "nothing-to-accept",
+                vec![("standing", v(standing)), ("hint", v(hint))],
+            ));
+        }
+        let residual = review
+            .as_ref()
+            .and_then(|r| r.get("blocking").cloned())
+            .unwrap_or(Value::Null);
+        fields = vec![
+            ("accepted_ref", v(reference)),
+            ("round", round_of(&review)),
+            ("residual", residual),
+        ];
+        let mut event = vec![("cell", v(name))];
+        event.extend(fields.iter().cloned());
+        camp.emit("review-accept", event)?;
+        if !passed {
+            // e.g. stopped at the cap while the gate was pending
+            set_cell_state(camp, name, "open")?;
+            camp.save_decl()?;
+            clear_stalls(camp, Some(name), None, false)?;
+            let mut out = vec![
+                ("ok", Value::Bool(true)),
+                ("cell", v(name)),
+                ("state", v("open")),
+            ];
+            out.extend(fields);
+            out.push(("note", v("accepted; the cell closes when its gate passes")));
+            return Ok(obj(out));
+        }
+    } else if !closable(standing) {
         return Err(PmError::refused(
-            "no-clean-review-after-gate",
-            vec![("latest_round", round)],
+            "no-standing-clean-review",
+            vec![
+                ("standing", v(standing)),
+                ("round", round_of(&review)),
+                ("hint", v(close_hint(standing))),
+            ],
         ));
     }
     set_cell_state(camp, name, "closed")?;
@@ -1533,12 +1648,16 @@ pub fn cmd_cell_close(camp: &mut Campaign, args: &Args) -> Out {
         camp.save_gate(&group, &gate)?;
     }
     camp.save_decl()?;
-    camp.emit("cell-close", vec![("cell", v(name))])?;
-    Ok(obj([
+    let mut event = vec![("cell", v(name))];
+    event.extend(fields.iter().cloned());
+    camp.emit("cell-close", event)?;
+    let mut out = vec![
         ("ok", Value::Bool(true)),
         ("cell", v(name)),
         ("state", v("closed")),
-    ]))
+    ];
+    out.extend(fields);
+    Ok(obj(out))
 }
 
 pub fn cmd_review_record(camp: &mut Campaign, args: &Args) -> Out {
@@ -1573,6 +1692,35 @@ pub fn cmd_review_record(camp: &mut Campaign, args: &Args) -> Out {
         return Err(PmError::refused(
             "cell-not-open",
             vec![("state", state_of(&cell)?)],
+        ));
+    }
+    if settled_at(camp, name)?.is_none() {
+        return Err(PmError::refused(
+            "cell-not-settled",
+            vec![(
+                "hint",
+                v("a review looks at a finished change: close its phases first"),
+            )],
+        ));
+    }
+    let (standing, current) = standing_review(camp, name)?;
+    if closable(standing) {
+        return Err(PmError::refused(
+            "review-not-needed",
+            vec![
+                ("round", round_of(&current)),
+                ("standing", v(standing)),
+                ("hint", v("cell close")),
+            ],
+        ));
+    }
+    if standing == "blocking" {
+        return Err(PmError::refused(
+            "fix-first",
+            vec![
+                ("round", round_of(&current)),
+                ("hint", v(close_hint("blocking"))),
+            ],
         ));
     }
     let expected = plus_one(&review_round(camp, &cell)?)?;

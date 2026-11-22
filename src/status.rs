@@ -221,11 +221,31 @@ pub fn actionable(camp: &mut Campaign) -> Res<Vec<Obj>> {
             && eq_str(Some(&camp.gate_state(&group)?), "passed")
         {
             let name = py_str(&c["cell"]);
+            let (kind, text, command) = match crate::commands::standing_review(camp, &name)?.0 {
+                standing @ ("clean" | "accepted") => (
+                    "close",
+                    format!("cell {name}에 서 있는 검토가 {standing}이다. 닫는다"),
+                    format!("{pm} cell close {name}"),
+                ),
+                "blocking" => (
+                    "fix",
+                    format!("cell {name}의 차단 지적을 고치거나 사람에게 넘긴다(다음 회차는 고친 뒤에만)"),
+                    format!(
+                        "{pm} cell reopen {name} --reason <고칠 차단> 또는 사람이 받아들이면 \
+                         {pm} cell close {name} --accept-ref <근거>"
+                    ),
+                ),
+                _ => (
+                    "review",
+                    format!("cell {name}의 새 맥락 검토를 받는다(차단이 없으면 그 회차로 닫힌다)"),
+                    format!("{pm} review record {name} <review.json>"),
+                ),
+            };
             items.add(
                 3,
-                "review",
-                format!("cell {name}의 새 맥락 검토를 받고 닫는다"),
-                format!("{pm} review record {name} <review.json> 뒤 {pm} cell close {name}"),
+                kind,
+                text,
+                command,
                 vec![
                     ("cell", Value::from(name.as_str())),
                     ("group", c["group"].clone()),

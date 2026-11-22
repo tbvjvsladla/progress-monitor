@@ -394,6 +394,22 @@ impl Sandbox {
         }
     }
 
+    /// Reopen a cell for a fix, finish the change again and, if given, pass its gate again.
+    pub fn refix(&self, name: &str, gate: Option<&str>) {
+        self.ok(&[
+            "cell",
+            "reopen",
+            name,
+            "--reason",
+            "fix the blocking findings",
+        ]);
+        self.ok(&["phase", "start", name, "change"]);
+        self.ok(&["phase", "close", name, "change"]);
+        if let Some(group) = gate {
+            self.ok(&["gate", "run", group]);
+        }
+    }
+
     // -- reading state
     pub fn cell(&self, name: &str) -> Value {
         let decl = Self::read(&self.inst.join("campaign.json"));
@@ -525,6 +541,17 @@ impl Sandbox {
             .as_array()
             .unwrap()
             .iter()
+            .map(|item| item["kind"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    /// The actionable kinds of one cell.
+    pub fn kinds_of(&self, cell: &str) -> Vec<String> {
+        self.ok(&["status"])["actionable"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item["cell"] == cell)
             .map(|item| item["kind"].as_str().unwrap().to_string())
             .collect()
     }

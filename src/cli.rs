@@ -221,7 +221,12 @@ static LEAVES: &[Leaf] = &[
         &[value("--ref")],
         c::cmd_cell_resume,
     ),
-    leaf(&["cell", "close"], &["cell"], &[], c::cmd_cell_close),
+    leaf(
+        &["cell", "close"],
+        &["cell"],
+        &[value("--accept-ref")],
+        c::cmd_cell_close,
+    ),
     leaf(
         &["review", "record"],
         &["cell", "review"],
@@ -278,7 +283,8 @@ Commands:
   check invalidate <check> --reason <why> | check run <check> --explore <id> --target <dir>
   explore open --cell <cell> --reason <why> | explore close <id> --selected <x> --ref <r> [--note <n>]
   cell add <spec.json> | cell cancel|reopen|stop <cell> --reason <why>
-  cell move <cell> <group> --reason <why> [--checks a,b] | cell resume <cell> --ref <r> | cell close <cell>
+  cell move <cell> <group> --reason <why> [--checks a,b] | cell resume <cell> --ref <r>
+  cell close <cell> [--accept-ref <r>]
   review record <cell> <review.json>
   hitl open --kind <k> --question <q> (--cell <c> | --group <g> | --final)
   hitl answer <id> --ref <r> [--allow]

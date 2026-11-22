@@ -77,7 +77,16 @@ fn directive(pm: &str, item: &Obj, count: Num, retries: Num) -> Res<(&'static st
             format!("그 일을 한 번 더 시도한다: {}", text("command")),
         ));
     }
-    if ["phase-running", "review", "phase-failed", "phase-start"].contains(&kind.as_str()) {
+    if [
+        "phase-running",
+        "review",
+        "close",
+        "fix",
+        "phase-failed",
+        "phase-start",
+    ]
+    .contains(&kind.as_str())
+    {
         return Ok((
             "bypass",
             format!(

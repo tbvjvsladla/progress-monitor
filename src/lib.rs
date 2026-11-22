@@ -47,7 +47,7 @@ pub const SECTIONS: [&str; 6] = [
 pub const REVIEW: [&str; 4] = ["none", "user-request", "high-impact", "judgment"];
 
 /// Events only the executor may write; `event` refuses them.
-pub const RESERVED_EVENTS: [&str; 23] = [
+pub const RESERVED_EVENTS: [&str; 24] = [
     "campaign-open",
     "phase-start",
     "phase-retry",
@@ -64,6 +64,7 @@ pub const RESERVED_EVENTS: [&str; 23] = [
     "cell-resume",
     "cell-close",
     "review",
+    "review-accept",
     "hitl",
     "hitl-answer",
     "invalidate",

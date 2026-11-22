@@ -2,7 +2,7 @@
 
 > **여러 세션에 걸쳐 오래 도는 개선 작업(Long Time E2E)을, 꼭 필요한 검증만 한 번씩 돌리며 멈추지 않고 이어 가게 하는 캠페인 운영 스킬입니다.**
 >
-> 배포 버전 **2.0.0** · 브랜치 `logic-rust` · Rust(cargo, 설치 때 빌드) · Git · Claude Code와 Codex 프로젝트 스킬용 전체 폴더 패키지
+> 배포 버전 **2.1.0** · 브랜치 `logic-rust` · Rust(cargo, 설치 때 빌드) · Git · Claude Code와 Codex 프로젝트 스킬용 전체 폴더 패키지
 
 ## 해결하려는 문제: 하루를 넘기는 작업은 대화 기억으로 이어 갈 수 없습니다
 
@@ -91,7 +91,7 @@ wiki-desk를 설치하면 프로젝트에 `__llm-wiki/`가 생기고, wiki-desk 
 (
   set -euo pipefail
   SOURCE="/absolute/path/to/progress-monitor"   # 이 저장소를 받은 폴더(git clone)
-  VERSION="v2.0.0"
+  VERSION="v2.1.0"
   PROJECT="/absolute/path/to/project"           # 설치할 프로젝트 루트
   DEST="$PROJECT/.claude/skills/progress-monitor"
 
@@ -151,7 +151,7 @@ wiki-desk를 설치하면 프로젝트에 `__llm-wiki/`가 생기고, wiki-desk 
 | 단계 | `phase start\|close\|retry <cell> <phase>` |
 | 검증 | `gate run <group>`, `gate reopen`, `final run`, `check invalidate`, `check run` |
 | 방향 조정 | `cell add\|cancel\|move\|reopen\|stop\|resume\|close`, `explore open\|close` |
-| 검토와 사람 | `review record`, `hitl open\|answer`, `event` |
+| 검토와 사람 | `review record`, `cell close [--accept-ref]`, `hitl open\|answer`, `event` |
 | 훅 | `stop-hook --harness claude\|codex`, `monitor reset` |
 
 언제 무엇을 부르는지는 `SKILL.md`, 파일 형식은 `campaigns/README.md`(패키지 사본 `assets/campaigns/README.md`)가 정본입니다.

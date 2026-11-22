@@ -154,24 +154,149 @@ fn member_added_to_passed_group_reopens() {
 }
 
 #[test]
-fn marked_cell_closes_after_clean_review() {
+fn clean_review_before_the_gate_closes_with_the_gate() {
     let sb = Sandbox::new();
     sb.set_cell("a1", json!({"review": "judgment"}));
     sb.finish(&["a1", "a2"]);
     sb.ok(&["review", "record", "a1", &sb.review(1, true)]); // before the gate passes
+    assert_eq!(
+        sb.no(&["cell", "close", "a1"])["refused"],
+        "conditions-unmet"
+    );
+    assert_eq!(
+        sb.ok(&["gate", "run", "g-a"])["closed"],
+        json!(["a1", "a2"])
+    );
+    assert_eq!(sb.events("review").len(), 1);
+    sb.assert_lint();
+}
+
+#[test]
+fn next_round_only_after_a_fixed_blocking_finding() {
+    let sb = Sandbox::new();
+    sb.set_cell("a1", json!({"review": "judgment"}));
+    assert_eq!(
+        sb.no(&["review", "record", "a1", &sb.review(1, true)])["refused"],
+        "cell-not-settled"
+    );
+    sb.finish(&["a1", "a2"]);
     sb.ok(&["gate", "run", "g-a"]);
+    assert_eq!(sb.kinds_of("a1"), ["review"]);
+    sb.ok(&["review", "record", "a1", &sb.review(1, false)]);
+    assert_eq!(sb.kinds_of("a1"), ["fix"]);
+    let refused = sb.no(&["cell", "close", "a1"]);
     assert_eq!(
-        sb.no(&["cell", "close", "a1"])["refused"],
-        "no-clean-review-after-gate"
+        (&refused["refused"], &refused["standing"]),
+        (&json!("no-standing-clean-review"), &json!("blocking"))
     );
-    sb.ok(&["review", "record", "a1", &sb.review(2, false)]);
     assert_eq!(
-        sb.no(&["cell", "close", "a1"])["refused"],
-        "no-clean-review-after-gate"
+        sb.no(&["review", "record", "a1", &sb.review(2, true)])["refused"],
+        "fix-first"
     );
-    sb.ok(&["review", "record", "a1", &sb.review(3, true)]);
+    sb.ok(&["cell", "reopen", "a1", "--reason", "fix r1-1"]);
+    sb.ok(&["phase", "start", "a1", "change"]);
+    sb.ok(&["phase", "close", "a1", "change"]);
+    // a1 has no review of the fix yet
+    assert_eq!(sb.ok(&["gate", "run", "g-a"])["closed"], json!(["a2"]));
+    sb.ok(&["review", "record", "a1", &sb.review(2, true)]);
+    assert_eq!(sb.kinds_of("a1"), ["close"]);
+    assert_eq!(
+        sb.no(&["review", "record", "a1", &sb.review(3, true)])["refused"],
+        "review-not-needed"
+    );
     sb.ok(&["cell", "close", "a1"]);
     assert_eq!(sb.cell("a1")["state"], "closed");
+    sb.assert_lint();
+}
+
+#[test]
+fn gate_rerun_by_another_cell_keeps_a_standing_review() {
+    let sb = Sandbox::new();
+    sb.set_cell("a1", json!({"review": "judgment"}));
+    sb.finish(&["a1", "a2"]);
+    sb.ok(&["gate", "run", "g-a"]);
+    sb.ok(&["review", "record", "a1", &sb.review(1, true)]);
+    sb.ok(&["cell", "close", "a1"]);
+    sb.ok(&["cell", "reopen", "a2", "--reason", "a2 changes again"]);
+    assert_eq!(sb.cell("a1")["state"], "open");
+    sb.ok(&["phase", "start", "a2", "change"]);
+    sb.ok(&["phase", "close", "a2", "change"]);
+    assert_eq!(
+        sb.ok(&["gate", "run", "g-a"])["closed"],
+        json!(["a1", "a2"])
+    );
+    // no second review of the unchanged a1
+    assert_eq!(sb.events("review").len(), 1);
+    sb.assert_lint();
+}
+
+#[test]
+fn person_accepts_blocking_findings() {
+    let sb = Sandbox::new();
+    sb.set_cell("a1", json!({"review": "judgment"}));
+    sb.finish(&["a1", "a2"]);
+    sb.ok(&["gate", "run", "g-a"]);
+    assert_eq!(
+        sb.no(&["cell", "close", "a1", "--accept-ref", "docs/x.md"])["refused"],
+        "nothing-to-accept"
+    );
+    sb.ok(&["review", "record", "a1", &sb.review(1, false)]);
+    sb.no_code(&["cell", "close", "a1", "--accept-ref", " "], 2);
+    let closed = sb.ok(&["cell", "close", "a1", "--accept-ref", "docs/decision.md"]);
+    assert_eq!(
+        (&closed["state"], &closed["round"]),
+        (&json!("closed"), &json!(1))
+    );
+    let event = sb.events("cell-close").last().unwrap().clone();
+    assert_eq!(event["accepted_ref"], "docs/decision.md");
+    assert_eq!(
+        pluck(event["residual"].as_array().unwrap(), "id"),
+        json!(["r1-1"])
+    );
+    assert_eq!(sb.events("review-accept").len(), 1);
+    sb.refix("a2", None); // another cell re-runs the gate
+    assert_eq!(
+        sb.no(&["review", "record", "a1", &sb.review(2, true)])["refused"],
+        "review-not-needed"
+    );
+    assert_eq!(
+        sb.ok(&["gate", "run", "g-a"])["closed"],
+        json!(["a1", "a2"])
+    );
+    sb.assert_lint();
+}
+
+#[test]
+fn accept_a_cell_stopped_while_its_gate_is_pending() {
+    let sb = Sandbox::new();
+    sb.set_cell("a1", json!({"review": "judgment"}));
+    sb.finish(&["a1", "a2"]);
+    for number in [1, 2] {
+        sb.ok(&["review", "record", "a1", &sb.review(number, false)]);
+        sb.refix("a1", None); // no gate run in between
+    }
+    assert_eq!(
+        sb.ok(&["review", "record", "a1", &sb.review(3, false)])["stopped"],
+        true
+    );
+    let groups = sb.ok(&["status"])["groups"].clone();
+    let g_a = groups
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|g| g["group"] == "g-a")
+        .unwrap()
+        .clone();
+    assert_eq!(g_a["gate"], "pending");
+    let accepted = sb.ok(&["cell", "close", "a1", "--accept-ref", "docs/accept.md"]);
+    assert_eq!(
+        (&accepted["state"], &accepted["round"]),
+        (&json!("open"), &json!(3))
+    );
+    assert_eq!(
+        sb.ok(&["gate", "run", "g-a"])["closed"],
+        json!(["a1", "a2"])
+    );
     sb.assert_lint();
 }
 
@@ -179,11 +304,14 @@ fn marked_cell_closes_after_clean_review() {
 fn review_cap_stops_only_if_blocking() {
     let sb = Sandbox::new();
     sb.set_cell("a1", json!({"review": "judgment"}));
+    sb.finish(&["a1", "a2"]);
+    sb.ok(&["gate", "run", "g-a"]);
     for number in [1, 2] {
         assert_eq!(
             sb.ok(&["review", "record", "a1", &sb.review(number, false)])["stopped"],
             false
         );
+        sb.refix("a1", Some("g-a"));
     }
     assert_eq!(
         sb.ok(&["review", "record", "a1", &sb.review(3, false)])["stopped"],
@@ -191,15 +319,23 @@ fn review_cap_stops_only_if_blocking() {
     );
     assert_eq!(sb.cell("a1")["state"], "stopped");
     sb.ok(&["cell", "resume", "a1", "--ref", "docs/approval.md"]);
+    sb.refix("a1", Some("g-a"));
     assert_eq!(
         sb.ok(&["review", "record", "a1", &sb.review(4, false)])["stopped"],
         true
     );
+    // a stopped cell a person accepts
+    sb.ok(&["cell", "close", "a1", "--accept-ref", "docs/accept.md"]);
+    assert_eq!(sb.cell("a1")["state"], "closed");
+    sb.assert_lint();
 
     let clean = Sandbox::new();
     clean.set_cell("a1", json!({"review": "judgment"}));
+    clean.finish(&["a1", "a2"]);
+    clean.ok(&["gate", "run", "g-a"]);
     for number in [1, 2] {
         clean.ok(&["review", "record", "a1", &clean.review(number, false)]);
+        clean.refix("a1", Some("g-a"));
     }
     assert_eq!(
         clean.ok(&["review", "record", "a1", &clean.review(3, true)])["stopped"],
@@ -222,6 +358,7 @@ fn auto_cell_cap_hands_over() {
 fn parentless_cell_review_is_none() {
     let sb = Sandbox::new();
     sb.set_cell("a1", json!({"review": "judgment"}));
+    sb.finish(&["a1"]);
     sb.ok(&["review", "record", "a1", &sb.review(1, false)]);
     assert_eq!(
         sb.ok(&["cell", "add", &sb.spec("orphan", "g-a", json!({}))])["review"],
@@ -235,6 +372,7 @@ fn parentless_cell_review_is_none() {
         ])["review"],
         "judgment"
     );
+    sb.finish(&["child"]);
     assert_eq!(
         sb.no(&["review", "record", "child", &sb.review(1, true)])["expected"],
         2
