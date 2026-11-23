@@ -2,7 +2,7 @@
 
 > **여러 세션에 걸쳐 오래 도는 개선 작업(Long Time E2E)을, 꼭 필요한 검증만 한 번씩 돌리며 멈추지 않고 이어 가게 하는 캠페인 운영 스킬입니다.**
 >
-> 배포 버전 **1.0.0** · 브랜치 `main` · Python 3.9+ 표준 라이브러리 · Git · Claude Code와 Codex 프로젝트 스킬용 전체 폴더 패키지
+> 배포 버전 **1.1.0** · 브랜치 `logic-py` · Python 3.9+ 표준 라이브러리 · Git · Claude Code와 Codex 프로젝트 스킬용 전체 폴더 패키지
 
 ## 해결하려는 문제: 하루를 넘기는 작업은 대화 기억으로 이어 갈 수 없습니다
 
@@ -83,20 +83,21 @@ wiki-desk를 설치하면 프로젝트에 `__llm-wiki/`가 생기고, wiki-desk 
 
 **폴더 전체가 한 단위입니다.** `SKILL.md`만 복사하면 실행기와 뼈대가 빠집니다. 같은 이름의 스킬이 이미 있으면 덮어쓰지 말고 차이를 먼저 검토하세요.
 
-배포 단위는 **태그된 커밋**입니다. `git archive`로 받으면 `PACKAGE_MANIFEST.json`과 바이트 단위로 같은 트리가 설치됩니다.
+배포 단위는 **태그된 커밋**입니다. `git archive`로 받은 설치본은 `package_manifest.py --check --against`로 받은 저장소의 태그와 바이트를 직접 비교해 확인합니다. `PACKAGE_MANIFEST.json`은 패키지를 이루는 파일의 목록·크기·모드만 적고 digest는 적지 않습니다.
 
 ```bash
 (
   set -euo pipefail
   SOURCE="/absolute/path/to/progress-monitor"   # 이 저장소를 받은 폴더(git clone)
-  VERSION="v1.0.0"
+  VERSION="v1.1.0"
   PROJECT="/absolute/path/to/project"           # 설치할 프로젝트 루트
   DEST="$PROJECT/.claude/skills/progress-monitor"
 
   test ! -e "$DEST" || { echo "이미 있음: $DEST (차이를 먼저 검토)"; exit 1; }
   mkdir -p "$DEST"
   git -C "$SOURCE" archive "$VERSION" | tar -x -C "$DEST"
-  python3 -B "$DEST/scripts/package_manifest.py" --check "$DEST"   # MANIFEST OK
+  python3 -B "$DEST/scripts/package_manifest.py" --check "$DEST" \
+    --against "$SOURCE" --ref "$VERSION"                         # MANIFEST OK (…, same bytes as v1.1.0)
 )
 ```
 
@@ -110,6 +111,8 @@ wiki-desk를 설치하면 프로젝트에 `__llm-wiki/`가 생기고, wiki-desk 
   ```
 
 실행기는 자기 위치에서 프로젝트 루트를 찾습니다. 스킬 폴더가 `<루트>/.claude/skills/`, `<루트>/.agents/skills/`, `<루트>/skills/` 아래에 있으면 그 `<루트>`입니다. 그 밖의 자리에 두었으면 환경 변수 `PM_PROJECT_ROOT`로 루트를 알려 줍니다.
+
+같은 기능의 Rust판(2.x)은 `logic-rust` 브랜치에 있습니다. 이 판 1.1.0의 기능은 Rust판 2.2.0과 같습니다(검토는 필요할 때만, 사람의 차단 수용 `cell close --accept-ref`, digest 없는 manifest와 `--against`).
 
 ## 설치 여정 2: campaigns/와 종료 훅 깔기
 
@@ -147,7 +150,7 @@ python3 -B .claude/skills/progress-monitor/scripts/check_campaign.py     # 틀 �
 | 단계 | `phase start\|close\|retry <cell> <phase>` |
 | 검증 | `gate run <group>`, `gate reopen`, `final run`, `check invalidate`, `check run` |
 | 방향 조정 | `cell add\|cancel\|move\|reopen\|stop\|resume\|close`, `explore open\|close` |
-| 검토와 사람 | `review record`, `hitl open\|answer`, `event` |
+| 검토와 사람 | `review record`, `cell close [--accept-ref]`, `hitl open\|answer`, `event` |
 | 훅 | `stop-hook --harness claude\|codex`, `monitor reset` |
 
 언제 무엇을 부르는지는 `SKILL.md`, 파일 형식은 `campaigns/README.md`(패키지 사본 `assets/campaigns/README.md`)가 정본입니다.
@@ -164,7 +167,7 @@ progress-monitor/
 │  ├─ check_campaign.py     틀·인스턴스 형식 검사(읽기만 함, 자체 음성 대조 포함)
 │  ├─ smoke_install.py      빈 임시 프로젝트 설치 연기
 │  ├─ sanitize_check.py     배포 위생 검사(배포자용)
-│  └─ package_manifest.py   PACKAGE_MANIFEST 생성·검증(배포자용)
+│  └─ package_manifest.py   PACKAGE_MANIFEST 생성·검증, 설치본과 태그의 직접 비교
 ├─ assets/
 │  ├─ campaigns/            init이 깔 README.md와 _template/
 │  └─ examples/             합성 예제 캠페인과 그 대상
@@ -176,7 +179,7 @@ progress-monitor/
 ```bash
 python3 -B scripts/sanitize_check.py              # SANITIZE OK (0 hits)
 python3 -B -m unittest discover -s tests -v       # 실행기 회귀 + init·위생·버전·설치 연기
-python3 -B scripts/smoke_install.py               # 마지막 줄 SMOKE-PASS
+python3 -B scripts/smoke_install.py               # 마지막 줄 SMOKE-PASS (설치본 직접 비교와 --against 포함)
 python3 -B scripts/package_manifest.py            # 파일을 바꿨으면 다시 쓴다
 python3 -B scripts/package_manifest.py --check    # MANIFEST OK
 ```

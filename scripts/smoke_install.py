@@ -2,8 +2,9 @@
 """Install the package into an empty temporary project and run the synthetic campaign end to end.
 
 Steps: copy this folder to <tmp>/.claude/skills/progress-monitor (and link it from
-.agents/skills for Codex), `init` dry-run then `--apply` then again (nothing is
-overwritten), lint the laid template, run the demo campaign from
+.agents/skills for Codex), compare the copy with the package byte for byte, check an
+archive install of a tag with `package_manifest --check --against` (no digests),
+`init` dry-run then `--apply` then again (nothing is overwritten), lint the laid template, run the demo campaign from
 assets/examples through prepare -> change -> gate -> final, lint the instance,
 and call the Stop hook with and without campaigns/ACTIVE.
 
@@ -39,6 +40,9 @@ class Smoke:
     def run(self, args: list[str], cwd: Path | None = None, stdin: str | None = None) -> subprocess.CompletedProcess:
         env = {k: v for k, v in os.environ.items() if not k.startswith("PM_")}
         env["PM_EXECUTOR"] = "smoke"
+        if args and args[0] == "git":
+            env["GIT_CONFIG_GLOBAL"] = os.devnull
+            env["GIT_CONFIG_NOSYSTEM"] = "1"
         return subprocess.run(args, cwd=str(cwd or self.root), input=stdin, capture_output=True, text=True,
                               env=env, timeout=300)
 
@@ -76,6 +80,56 @@ def copy_package(dest: Path) -> None:
     shutil.copytree(PACKAGE, dest, ignore=ignore)
 
 
+def manifest_steps(s: Smoke, tmp: Path) -> None:
+    """The installed copy has the package's bytes, and an archive install of a tag passes
+    `package_manifest --check --against` while one changed byte fails it."""
+    sys.path.insert(0, str(PACKAGE / "scripts"))
+    from package_manifest import inventory
+    for rel in inventory(PACKAGE):
+        if (PACKAGE / rel).read_bytes() != (s.skill / rel).read_bytes():
+            s.fail("installed copy has the package's bytes", rel)
+    s.ok("installed copy has the package's bytes (direct comparison, no digest)")
+
+    repo = tmp / "release-repo"
+    copy_package(repo)
+    s.git(repo, "init", "-q", ".")
+    s.git(repo, "add", "-A")
+    s.git(repo, "commit", "-q", "-m", "release")
+    s.git(repo, "tag", "-a", "t1", "-m", "t1")
+    installed = tmp / "archive-install"
+    installed.mkdir()
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    archive = subprocess.Popen([*GIT, "-C", str(repo), "archive", "t1"], stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, env=env)
+    untar = subprocess.run(["tar", "-x", "-C", str(installed)], stdin=archive.stdout, capture_output=True)
+    archive.stdout.close()
+    archive_err = archive.stderr.read()
+    if archive.wait() != 0 or untar.returncode != 0:
+        s.fail("git archive t1 | tar -x", {"git": archive_err.decode(errors="replace"),
+                                          "tar": untar.stderr.decode(errors="replace")})
+    s.ok("git archive t1 | tar -x makes an archive install")
+    cache = installed / "scripts" / "__pycache__"
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / "pm.cpython-0.pyc").write_bytes(b"made after install\n")
+
+    tool = [sys.executable, "-B", str(s.skill / "scripts" / "package_manifest.py"),
+            "--check", str(installed), "--against", str(repo), "--ref", "t1"]
+    done = s.run(tool)
+    if done.returncode != 0 or "same bytes as t1" not in done.stdout:
+        s.fail("package_manifest --check --against", {"exit": done.returncode, "stdout": done.stdout[-2000:],
+                                                      "stderr": done.stderr[-2000:]})
+    s.ok("package_manifest --against agrees with the archive install (__pycache__ made after install is ignored)")
+
+    skill_md = installed / "SKILL.md"
+    skill_md.write_text(skill_md.read_text(encoding="utf-8").replace("progress-monitor", "progress-monitoq", 1),
+                        encoding="utf-8")
+    done = s.run(tool)
+    if done.returncode != 1 or "differs from t1: SKILL.md" not in done.stdout:
+        s.fail("package_manifest --against notices one changed byte", {"exit": done.returncode,
+                                                                       "stdout": done.stdout[-2000:]})
+    s.ok("package_manifest --against notices one changed byte with the size unchanged")
+
+
 def main() -> int:
     keep = "--keep" in sys.argv[1:]
     tmp = Path(tempfile.mkdtemp(prefix="pm-smoke-"))
@@ -87,6 +141,7 @@ def main() -> int:
         agents.mkdir(parents=True)
         (agents / "progress-monitor").symlink_to(Path("..") / ".." / ".claude" / "skills" / "progress-monitor")
         s.ok("install")
+        manifest_steps(s, tmp)
 
         dry = s.pm("init")
         if dry["mode"] != "dry-run" or not dry["created"] or (s.root / "campaigns").exists():
